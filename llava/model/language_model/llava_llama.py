@@ -24,6 +24,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, \
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.generation.utils import GenerateOutput
 
+from .fastv_kvcache import FastVLlamaModel
 from ..llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
 
 
@@ -38,17 +39,31 @@ class LlavaLlamaModel(LlavaMetaModel, LlamaModel):
         super(LlavaLlamaModel, self).__init__(config)
 
 
+class FastVLlavaLlamaModel(LlavaMetaModel, FastVLlamaModel):
+    # Alter LlavaLlamaModel to FastVLlavaLlamaModel
+    config_class = LlavaLlamaConfig
+
+    def __init__(self, config: LlamaConfig, fastv_config: dict):
+        super(FastVLlavaLlamaModel, self).__init__(config, fastv_config)
+
+
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaLlamaConfig
 
-    def __init__(self, config, pruning_method=None, visual_token_num=None):
+    def __init__(self, config, pruning_method=None, visual_token_num=None, 
+                 use_fastv=False, fastv_config=None):
         super(LlamaForCausalLM, self).__init__(config)
-        self.model = LlavaLlamaModel(config)
+        if not use_fastv:
+            self.model = LlavaLlamaModel(config)
+        else:
+            print(f"Use FastV: {fastv_config}!")
+            self.model = FastVLlavaLlamaModel(config, fastv_config)
+        
         self.pretraining_tp = config.pretraining_tp
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
-        # Visual Token Pruning Config
+        # Visual Token Pruning config
         self.pruning_method = pruning_method
         self.visual_token_num = visual_token_num
 
@@ -144,6 +159,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 images,
                 image_sizes=image_sizes
             )
+            if self.pruning_method == "fastv":
+                visual_token_num = self.visual_token_num
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
             visual_token_num = 0

@@ -61,10 +61,14 @@ def eval_model(args):
     disable_torch_init()
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(model_path)
+
+    use_fastv = True if args.pruning_method == "fastv" else False
+    fastv_config = {"K": 2, "R": args.visual_token_num}
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
-        visual_token_num=args.visual_token_num
+        visual_token_num=args.visual_token_num,
+        use_fastv=use_fastv, fastv_config=fastv_config
     )
 
     # Data
