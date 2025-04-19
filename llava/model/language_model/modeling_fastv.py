@@ -7,8 +7,16 @@ from transformers.modeling_outputs import BaseModelOutputWithPast
 
 
 R_dict = {
-    128: 98,
-    64: 29,
+    2: {
+        192: 166,
+        128: 98,
+        64: 29,
+    },
+    3: {
+        192: 152,
+        128: 81,
+        64: 11,
+    },
 }
 
 
@@ -28,7 +36,7 @@ class FastVLlamaModel(LlamaModel):
 
         # FastV config
         self.K = fastv_config["K"]
-        self.R = R_dict[fastv_config["T"]]
+        self.R = R_dict[fastv_config["K"]][fastv_config["T"]]
     
     def forward(
         self,
