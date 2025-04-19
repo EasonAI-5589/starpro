@@ -88,7 +88,7 @@ def eval_model(args):
     model_name = get_model_name_from_path(model_path)
 
     use_fastv = True if args.pruning_method == "fastv" else False
-    fastv_config = {"K": 2, "R": args.visual_token_num}
+    fastv_config = {"K": 2, "T": args.visual_token_num}
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
@@ -128,7 +128,8 @@ def eval_model(args):
                 num_beams=args.num_beams,
                 max_new_tokens=args.max_new_tokens,
                 use_cache=True)
-            data_bar.set_postfix({"vtn": visual_token_num})
+            visual_token_num = model.model.visual_token_num
+            data_bar.set_postfix(vtn=f"{visual_token_num}")
 
         outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
 

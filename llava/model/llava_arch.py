@@ -28,11 +28,8 @@ from llava.mm_utils import get_anyres_image_grid_shape
 
 class LlavaMetaModel:
 
-    def __init__(self, config, fastv_config=None):
-        if fastv_config is not None:
-            super(LlavaMetaModel, self).__init__(config, fastv_config)
-        else:
-            super(LlavaMetaModel, self).__init__(config)
+    def __init__(self, config, **kwargs):
+        super(LlavaMetaModel, self).__init__(config, **kwargs)
 
         if hasattr(config, "mm_vision_tower"):
             self.vision_tower = build_vision_tower(config, delay_load=True)

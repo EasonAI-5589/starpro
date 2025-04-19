@@ -6,6 +6,12 @@ from transformers.models.llama.modeling_llama import LlamaModel, Cache, DynamicC
 from transformers.modeling_outputs import BaseModelOutputWithPast
 
 
+R_dict = {
+    128: 98,
+    64: 29,
+}
+
+
 class FastVLlamaModel(LlamaModel):
     """
     Transformer decoder consisting of *config.num_hidden_layers* layers. Each layer is a [`LlamaDecoderLayer`]
@@ -18,10 +24,11 @@ class FastVLlamaModel(LlamaModel):
         super().__init__(config)
         self.system_prompt_length = 35
         self.visual_token_length = 576
+        self.visual_token_num = 0
 
         # FastV config
         self.K = fastv_config["K"]
-        self.R = fastv_config["R"]
+        self.R = R_dict[fastv_config["T"]]
     
     def forward(
         self,
@@ -35,7 +42,6 @@ class FastVLlamaModel(LlamaModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
-
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -104,6 +110,10 @@ class FastVLlamaModel(LlamaModel):
         all_self_attns = () if output_attentions else None
         next_decoder_cache = None
 
+        if seq_length > 1:
+            visual_token_length = self.visual_token_length
+            visual_token_num = 0
+
         for decoder_layer in self.layers:
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
@@ -140,6 +150,7 @@ class FastVLlamaModel(LlamaModel):
                         device = hidden_states.device
                         image_attention = last_attention.mean(dim=1)[0, -1, self.system_prompt_length:self.system_prompt_length+self.visual_token_length] # (N)
 
+                        visual_token_length = self.R
                         visual_token_index = torch.topk(image_attention, k=self.R).indices # (R)
                         visual_token_index = torch.sort(visual_token_index).values # (R)
                         full_token_index = torch.cat((
@@ -153,6 +164,8 @@ class FastVLlamaModel(LlamaModel):
                         if attention_mask is not None:
                             attention_mask = attention_mask[:,:,:hidden_states.shape[1],:hidden_states.shape[1]]
                         position_ids = full_token_index.unsqueeze(0)
+                    
+                    visual_token_num += visual_token_length
 
                 layer_outputs = decoder_layer(
                     hidden_states,
@@ -172,6 +185,9 @@ class FastVLlamaModel(LlamaModel):
                 all_self_attns += (layer_outputs[1],)
 
         hidden_states = self.norm(hidden_states)
+
+        if seq_length > 1:
+            self.visual_token_num = visual_token_num / len(self.layers)
 
         # add hidden states from the last decoder layer
         if output_hidden_states:

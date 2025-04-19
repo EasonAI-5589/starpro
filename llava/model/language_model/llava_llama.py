@@ -44,15 +44,7 @@ class FastVLlavaLlamaModel(LlavaMetaModel, FastVLlamaModel):
     config_class = LlavaLlamaConfig
 
     def __init__(self, config: LlamaConfig, fastv_config: dict):
-        super(FastVLlavaLlamaModel, self).__init__(config, fastv_config)
-
-
-class SparseLlavaLlamaModel(LlavaMetaModel, SparseLlamaModel):
-    # Alter LlavaLlamaModel to FastVLlavaLlamaModel
-    config_class = LlavaLlamaConfig
-
-    def __init__(self, config: LlamaConfig, fastv_config: dict):
-        super(FastVLlavaLlamaModel, self).__init__(config, fastv_config)
+        super(FastVLlavaLlamaModel, self).__init__(config, fastv_config=fastv_config)
 
 
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
@@ -61,11 +53,11 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     def __init__(self, config, pruning_method=None, visual_token_num=None, 
                  use_fastv=False, fastv_config=None):
         super(LlamaForCausalLM, self).__init__(config)
-        if not use_fastv:
-            self.model = LlavaLlamaModel(config)
-        else:
-            print(f"Use FastV: {fastv_config}!")
+        if use_fastv:
+            print(f"Use FastV: {fastv_config}")
             self.model = FastVLlavaLlamaModel(config, fastv_config)
+        else:
+            self.model = LlavaLlamaModel(config)
         
         self.pretraining_tp = config.pretraining_tp
         self.vocab_size = config.vocab_size
