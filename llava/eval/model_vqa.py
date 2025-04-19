@@ -27,18 +27,30 @@ def get_chunk(lst, n, k):
 
 
 def eval_model(args):
+    # Seed
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+
     # Model
     disable_torch_init()
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(model_path)
-    tokenizer, model, image_processor, context_len = load_pretrained_model(model_path, args.model_base, model_name)
+    tokenizer, model, image_processor, context_len = load_pretrained_model(
+        model_path, args.model_base, model_name,
+        pruning_method=args.pruning_method,
+        visual_token_num=args.visual_token_num
+    )
 
+    # Data
     questions = [json.loads(q) for q in open(os.path.expanduser(args.question_file), "r")]
     questions = get_chunk(questions, args.num_chunks, args.chunk_idx)
     answers_file = os.path.expanduser(args.answers_file)
     os.makedirs(os.path.dirname(answers_file), exist_ok=True)
     ans_file = open(answers_file, "w")
-    for line in tqdm(questions):
+
+    data_bar = tqdm(questions)
+    for line in data_bar:
         idx = line["question_id"]
         image_file = line["image"]
         qs = line["text"]
@@ -59,7 +71,7 @@ def eval_model(args):
         image_tensor = process_images([image], image_processor, model.config)[0]
 
         with torch.inference_mode():
-            output_ids = model.generate(
+            output_ids, visual_token_num = model.generate(
                 input_ids,
                 images=image_tensor.unsqueeze(0).half().cuda(),
                 image_sizes=[image.size],
@@ -70,6 +82,7 @@ def eval_model(args):
                 # no_repeat_ngram_size=3,
                 max_new_tokens=1024,
                 use_cache=True)
+            data_bar.set_postfix({"vtn": visual_token_num})
 
         outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
 
@@ -96,6 +109,9 @@ if __name__ == "__main__":
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--top_p", type=float, default=None)
     parser.add_argument("--num_beams", type=int, default=1)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--pruning_method", type=str, default=None)
+    parser.add_argument("--visual_token_num", type=int, default=576)
     args = parser.parse_args()
 
     eval_model(args)

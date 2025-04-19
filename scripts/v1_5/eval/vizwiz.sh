@@ -1,14 +1,26 @@
 #!/bin/bash
 
+CKPT_DIR="/mnt/bn/bes-mllm-shared/checkpoint/LLaVA"
+DATA_DIR="/mnt/bn/bes-mllm-shared/data/LLaVA/LLaVA-Eval"
+
+CKPT="llava-v1.5-7b"
+SPLIT="llava_test"
+
+METHOD=${1}
+TOKEN=${2}
+PARAM="vtn_${TOKEN}"
+
 python -m llava.eval.model_vqa_loader \
-    --model-path liuhaotian/llava-v1.5-13b \
-    --question-file ./playground/data/eval/vizwiz/llava_test.jsonl \
-    --image-folder ./playground/data/eval/vizwiz/test \
-    --answers-file ./playground/data/eval/vizwiz/answers/llava-v1.5-13b.jsonl \
+    --model-path ${CKPT_DIR}/${CKPT} \
+    --question-file ./playground/data/eval/vizwiz/${SPLIT}.jsonl \
+    --image-folder ${DATA_DIR}/vizwiz/test \
+    --answers-file ./playground/data/eval/vizwiz/answers/${SPLIT}/${CKPT}/${METHOD}/${PARAM}.jsonl \
+    --pruning_method ${METHOD} \
+    --visual_token_num ${TOKEN} \
     --temperature 0 \
     --conv-mode vicuna_v1
 
 python scripts/convert_vizwiz_for_submission.py \
-    --annotation-file ./playground/data/eval/vizwiz/llava_test.jsonl \
-    --result-file ./playground/data/eval/vizwiz/answers/llava-v1.5-13b.jsonl \
-    --result-upload-file ./playground/data/eval/vizwiz/answers_upload/llava-v1.5-13b.json
+    --annotation-file ./playground/data/eval/vizwiz/${SPLIT}.jsonl \
+    --result-file ./playground/data/eval/vizwiz/answers/${SPLIT}/${CKPT}/${METHOD}/${PARAM}.jsonl \
+    --result-upload-file ./playground/data/eval/vizwiz/answers_upload/${SPLIT}/${CKPT}/${METHOD}/${PARAM}.json

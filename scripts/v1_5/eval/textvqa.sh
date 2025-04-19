@@ -1,13 +1,25 @@
 #!/bin/bash
 
+CKPT_DIR="/mnt/bn/bes-mllm-shared/checkpoint/LLaVA"
+DATA_DIR="/mnt/bn/bes-mllm-shared/data/LLaVA/LLaVA-Eval"
+
+CKPT="llava-v1.5-7b"
+SPLIT="llava_textvqa_val_v051_ocr"
+
+METHOD=${1}
+TOKEN=${2}
+PARAM="vtn_${TOKEN}"
+
 python -m llava.eval.model_vqa_loader \
-    --model-path liuhaotian/llava-v1.5-13b \
-    --question-file ./playground/data/eval/textvqa/llava_textvqa_val_v051_ocr.jsonl \
-    --image-folder ./playground/data/eval/textvqa/train_images \
-    --answers-file ./playground/data/eval/textvqa/answers/llava-v1.5-13b.jsonl \
+    --model-path ${CKPT_DIR}/${CKPT} \
+    --question-file ./playground/data/eval/textvqa/${SPLIT}.jsonl \
+    --image-folder ${DATA_DIR}/textvqa/train_images \
+    --answers-file ./playground/data/eval/textvqa/answers/${SPLIT}/${CKPT}/${METHOD}/${PARAM}.jsonl \
+    --pruning_method ${METHOD} \
+    --visual_token_num ${TOKEN} \
     --temperature 0 \
     --conv-mode vicuna_v1
 
 python -m llava.eval.eval_textvqa \
-    --annotation-file ./playground/data/eval/textvqa/TextVQA_0.5.1_val.json \
-    --result-file ./playground/data/eval/textvqa/answers/llava-v1.5-13b.jsonl
+    --annotation-file ${DATA_DIR}/textvqa/TextVQA_0.5.1_val.json \
+    --result-file ./playground/data/eval/textvqa/answers/${SPLIT}/${CKPT}/${METHOD}/${PARAM}.jsonl

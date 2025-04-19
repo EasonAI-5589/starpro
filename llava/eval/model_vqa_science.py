@@ -27,18 +27,30 @@ def get_chunk(lst, n, k):
 
 
 def eval_model(args):
+    # Seed
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+
     # Model
     disable_torch_init()
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(model_path)
-    tokenizer, model, image_processor, context_len = load_pretrained_model(model_path, args.model_base, model_name)
+    tokenizer, model, image_processor, context_len = load_pretrained_model(
+        model_path, args.model_base, model_name,
+        pruning_method=args.pruning_method,
+        visual_token_num=args.visual_token_num
+    )
 
+    # Data
     questions = json.load(open(os.path.expanduser(args.question_file), "r"))
     questions = get_chunk(questions, args.num_chunks, args.chunk_idx)
     answers_file = os.path.expanduser(args.answers_file)
     os.makedirs(os.path.dirname(answers_file), exist_ok=True)
     ans_file = open(answers_file, "w")
-    for i, line in enumerate(tqdm(questions)):
+    
+    data_bar = tqdm(questions)
+    for i, line in enumerate(data_bar):
         idx = line["id"]
         question = line['conversations'][0]
         qs = question['value'].replace('<image>', '').strip()
@@ -71,7 +83,7 @@ def eval_model(args):
         input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
 
         with torch.inference_mode():
-            output_ids = model.generate(
+            output_ids, visual_token_num = model.generate(
                 input_ids,
                 images=images,
                 image_sizes=image_sizes,
@@ -80,6 +92,7 @@ def eval_model(args):
                 max_new_tokens=1024,
                 use_cache=True,
             )
+            data_bar.set_postfix({"vtn": visual_token_num})
 
         outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
 
@@ -106,6 +119,9 @@ if __name__ == "__main__":
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--answer-prompter", action="store_true")
     parser.add_argument("--single-pred-prompt", action="store_true")
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--pruning_method", type=str, default=None)
+    parser.add_argument("--visual_token_num", type=int, default=576)
     args = parser.parse_args()
 
     eval_model(args)

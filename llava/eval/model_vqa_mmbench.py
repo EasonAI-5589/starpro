@@ -52,12 +52,22 @@ def get_options(row, options):
 
 
 def eval_model(args):
+    # Seed
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+
     # Model
     disable_torch_init()
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(model_path)
-    tokenizer, model, image_processor, context_len = load_pretrained_model(model_path, args.model_base, model_name)
+    tokenizer, model, image_processor, context_len = load_pretrained_model(
+        model_path, args.model_base, model_name,
+        pruning_method=args.pruning_method,
+        visual_token_num=args.visual_token_num
+    )
 
+    # Data
     questions = pd.read_table(os.path.expanduser(args.question_file))
     questions = get_chunk(questions, args.num_chunks, args.chunk_idx)
     answers_file = os.path.expanduser(args.answers_file)
@@ -68,7 +78,8 @@ def eval_model(args):
         args.conv_mode = args.conv_mode + '_mmtag'
         print(f'It seems that this is a plain model, but it is not using a mmtag prompt, auto switching to {args.conv_mode}.')
 
-    for index, row in tqdm(questions.iterrows(), total=len(questions)):
+    data_bar = tqdm(questions.iterrows(), total=len(questions))
+    for index, row in data_bar:
         options = get_options(row, all_options)
         cur_option_char = all_options[:len(options)]
 
@@ -108,7 +119,7 @@ def eval_model(args):
             image_tensor = process_images([image], image_processor, model.config)[0]
 
             with torch.inference_mode():
-                output_ids = model.generate(
+                output_ids, visual_token_num = model.generate(
                     input_ids,
                     images=image_tensor.unsqueeze(0).half().cuda(),
                     image_sizes=[image.size],
@@ -119,6 +130,7 @@ def eval_model(args):
                     # no_repeat_ngram_size=3,
                     max_new_tokens=1024,
                     use_cache=True)
+            data_bar.set_postfix({"vtn": visual_token_num})
 
             outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
 
@@ -155,6 +167,9 @@ if __name__ == "__main__":
     parser.add_argument("--all-rounds", action="store_true")
     parser.add_argument("--single-pred-prompt", action="store_true")
     parser.add_argument("--lang", type=str, default="en")
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--pruning_method", type=str, default=None)
+    parser.add_argument("--visual_token_num", type=int, default=576)
     args = parser.parse_args()
 
     eval_model(args)

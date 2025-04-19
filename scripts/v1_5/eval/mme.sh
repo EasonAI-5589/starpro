@@ -1,17 +1,31 @@
 #!/bin/bash
 
+CKPT_DIR="/mnt/bn/bes-mllm-shared/checkpoint/LLaVA"
+DATA_DIR="/mnt/bn/bes-mllm-shared/data/LLaVA/LLaVA-Eval"
+
+CKPT="llava-v1.5-7b"
+SPLIT="llava_mme"
+
+METHOD=${1}
+TOKEN=${2}
+PARAM="vtn_${TOKEN}"
+
 python -m llava.eval.model_vqa_loader \
-    --model-path liuhaotian/llava-v1.5-13b \
-    --question-file ./playground/data/eval/MME/llava_mme.jsonl \
-    --image-folder ./playground/data/eval/MME/MME_Benchmark_release_version \
-    --answers-file ./playground/data/eval/MME/answers/llava-v1.5-13b.jsonl \
+    --model-path ${CKPT_DIR}/${CKPT} \
+    --question-file ./playground/data/eval/MME/${SPLIT}.jsonl \
+    --image-folder ${DATA_DIR}/MME/MME_Benchmark_release_version \
+    --answers-file ./playground/data/eval/MME/answers/${SPLIT}/${CKPT}/${METHOD}/${PARAM}.jsonl \
+    --pruning_method ${METHOD} \
+    --visual_token_num ${TOKEN} \
     --temperature 0 \
     --conv-mode vicuna_v1
 
 cd ./playground/data/eval/MME
 
-python convert_answer_to_mme.py --experiment llava-v1.5-13b
+python convert_answer_to_mme.py \
+    --data_path ${DATA_DIR}/MME \
+    --experiment ${SPLIT}/${CKPT}/${METHOD}/${PARAM}
 
 cd eval_tool
 
-python calculation.py --results_dir answers/llava-v1.5-13b
+python calculation.py --results_dir answers/${SPLIT}/${CKPT}/${METHOD}/${PARAM}

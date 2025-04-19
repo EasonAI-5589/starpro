@@ -27,29 +27,41 @@ from transformers.generation.utils import GenerateOutput
 from ..llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
 
 
-class LlavaConfig(LlamaConfig):
+class LlavaLlamaConfig(LlamaConfig):
     model_type = "llava_llama"
 
 
 class LlavaLlamaModel(LlavaMetaModel, LlamaModel):
-    config_class = LlavaConfig
+    config_class = LlavaLlamaConfig
 
     def __init__(self, config: LlamaConfig):
         super(LlavaLlamaModel, self).__init__(config)
 
 
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
-    config_class = LlavaConfig
+    config_class = LlavaLlamaConfig
 
-    def __init__(self, config):
+    def __init__(self, config, pruning_method=None, visual_token_num=None):
         super(LlamaForCausalLM, self).__init__(config)
         self.model = LlavaLlamaModel(config)
         self.pretraining_tp = config.pretraining_tp
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
+        # Visual Token Pruning Config
+        self.pruning_method = pruning_method
+        self.visual_token_num = visual_token_num
+
         # Initialize weights and apply final processing
         self.post_init()
+    
+    # Visual Token Pruning
+    def get_pruning_method(self):
+        return self.pruning_method
+
+    # Visual Token Pruning
+    def get_visual_token_num(self):
+        return self.visual_token_num
 
     def get_model(self):
         return self.model
@@ -121,7 +133,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 attention_mask,
                 _,
                 inputs_embeds,
-                _
+                _,
+                visual_token_num
             ) = self.prepare_inputs_labels_for_multimodal(
                 inputs,
                 position_ids,
@@ -133,13 +146,14 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             )
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
+            visual_token_num = 0
 
         return super().generate(
             position_ids=position_ids,
             attention_mask=attention_mask,
             inputs_embeds=inputs_embeds,
             **kwargs
-        )
+        ), visual_token_num
 
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None,
                                       inputs_embeds=None, **kwargs):
@@ -154,5 +168,5 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs['image_sizes'] = image_sizes
         return inputs
 
-AutoConfig.register("llava_llama", LlavaConfig)
-AutoModelForCausalLM.register(LlavaConfig, LlavaLlamaForCausalLM)
+AutoConfig.register("llava_llama", LlavaLlamaConfig)
+AutoModelForCausalLM.register(LlavaLlamaConfig, LlavaLlamaForCausalLM)

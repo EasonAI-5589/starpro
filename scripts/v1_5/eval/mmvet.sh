@@ -1,16 +1,27 @@
 #!/bin/bash
 
+CKPT_DIR="/mnt/bn/bes-mllm-shared/checkpoint/LLaVA"
+DATA_DIR="/mnt/bn/bes-mllm-shared/data/LLaVA/LLaVA-Eval"
+
+CKPT="llava-v1.5-7b"
+SPLIT="llava-mm-vet"
+
+METHOD=${1}
+TOKEN=${2}
+PARAM="vtn_${TOKEN}"
+
 python -m llava.eval.model_vqa \
-    --model-path liuhaotian/llava-v1.5-13b \
-    --question-file ./playground/data/eval/mm-vet/llava-mm-vet.jsonl \
-    --image-folder ./playground/data/eval/mm-vet/images \
-    --answers-file ./playground/data/eval/mm-vet/answers/llava-v1.5-13b.jsonl \
+    --model-path ${CKPT_DIR}/${CKPT} \
+    --question-file ./playground/data/eval/mm-vet/${SPLIT}.jsonl \
+    --image-folder ${DATA_DIR}/mm-vet/images \
+    --answers-file ./playground/data/eval/mm-vet/answers/${SPLIT}/${CKPT}/${METHOD}/${PARAM}.jsonl \
+    --pruning_method ${METHOD} \
+    --visual_token_num ${TOKEN} \
     --temperature 0 \
     --conv-mode vicuna_v1
 
-mkdir -p ./playground/data/eval/mm-vet/results
+mkdir -p ./playground/data/eval/mm-vet/answers_upload/${SPLIT}/${CKPT}/${METHOD}
 
 python scripts/convert_mmvet_for_eval.py \
-    --src ./playground/data/eval/mm-vet/answers/llava-v1.5-13b.jsonl \
-    --dst ./playground/data/eval/mm-vet/results/llava-v1.5-13b.json
-
+    --src ./playground/data/eval/mm-vet/answers/${SPLIT}/${CKPT}/${METHOD}/${PARAM}.jsonl \
+    --dst ./playground/data/eval/mm-vet/answers_upload/${SPLIT}/${CKPT}/${METHOD}/${PARAM}.json

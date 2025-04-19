@@ -77,12 +77,22 @@ def create_data_loader(questions, image_folder, tokenizer, image_processor, mode
 
 
 def eval_model(args):
+    # Seed
+    torch.manual_seed(args.seed)
+    torch.cuda.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+
     # Model
     disable_torch_init()
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(model_path)
-    tokenizer, model, image_processor, context_len = load_pretrained_model(model_path, args.model_base, model_name)
+    tokenizer, model, image_processor, context_len = load_pretrained_model(
+        model_path, args.model_base, model_name,
+        pruning_method=args.pruning_method,
+        visual_token_num=args.visual_token_num
+    )
 
+    # Data
     questions = [json.loads(q) for q in open(os.path.expanduser(args.question_file), "r")]
     questions = get_chunk(questions, args.num_chunks, args.chunk_idx)
     answers_file = os.path.expanduser(args.answers_file)
@@ -95,16 +105,18 @@ def eval_model(args):
 
     data_loader = create_data_loader(questions, args.image_folder, tokenizer, image_processor, model.config)
 
-    for (input_ids, image_tensor, image_sizes), line in tqdm(zip(data_loader, questions), total=len(questions)):
+    data_bar = tqdm(zip(data_loader, questions), total=len(questions))
+    for (input_ids, image_tensors, image_sizes), line in data_bar:
         idx = line["question_id"]
         cur_prompt = line["text"]
 
         input_ids = input_ids.to(device='cuda', non_blocking=True)
+        image_tensors = image_tensors.to(dtype=torch.float16, device='cuda', non_blocking=True)
 
         with torch.inference_mode():
-            output_ids = model.generate(
+            output_ids, visual_token_num = model.generate(
                 input_ids,
-                images=image_tensor.to(dtype=torch.float16, device='cuda', non_blocking=True),
+                images=image_tensors,
                 image_sizes=image_sizes,
                 do_sample=True if args.temperature > 0 else False,
                 temperature=args.temperature,
@@ -112,6 +124,7 @@ def eval_model(args):
                 num_beams=args.num_beams,
                 max_new_tokens=args.max_new_tokens,
                 use_cache=True)
+            data_bar.set_postfix({"vtn": visual_token_num})
 
         outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
 
@@ -122,7 +135,7 @@ def eval_model(args):
                                    "answer_id": ans_id,
                                    "model_id": model_name,
                                    "metadata": {}}) + "\n")
-        # ans_file.flush()
+        ans_file.flush()
     ans_file.close()
 
 if __name__ == "__main__":
@@ -139,6 +152,9 @@ if __name__ == "__main__":
     parser.add_argument("--top_p", type=float, default=None)
     parser.add_argument("--num_beams", type=int, default=1)
     parser.add_argument("--max_new_tokens", type=int, default=128)
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--pruning_method", type=str, default=None)
+    parser.add_argument("--visual_token_num", type=int, default=576)
     args = parser.parse_args()
 
     eval_model(args)
