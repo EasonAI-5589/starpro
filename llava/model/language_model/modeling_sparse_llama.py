@@ -58,9 +58,8 @@ def cluster_and_merge(x, cluster_num):
     dist_nearest = torch.topk(dist_matrix, k=cluster_num, dim=-1, largest=False).values
     density = (-(dist_nearest ** 2).mean(dim=-1)).exp()
 
-    # add a little noise to ensure no tokens have the same density.
-    density = density + torch.rand(
-        density.shape, device=density.device, dtype=density.dtype) * 1e-6
+    # # add a little noise to ensure no tokens have the same density.
+    # density += torch.rand(density.shape, device=density.device, dtype=density.dtype) * 1e-6
 
     # get distance indicator
     mask = density[:, None, :] > density[:, :, None]
@@ -73,34 +72,34 @@ def cluster_and_merge(x, cluster_num):
     index_down = torch.topk(score, k=cluster_num, dim=-1).indices
 
     # assign tokens to the nearest center
-    dist_matrix = index_points(dist_matrix, index_down)     
-    idx_cluster = dist_matrix.argmin(dim=1)    
+    dist_matrix = index_points(dist_matrix, index_down)
+    idx_cluster = dist_matrix.argmin(dim=1)
 
-    # make sure cluster center merge to itself 
+    # make sure cluster center merge to itself
     idx_batch = torch.arange(B, device=x.device)[:, None].expand(B, cluster_num)
     idx_tmp = torch.arange(cluster_num, device=x.device)[None, :].expand(B, cluster_num)
     idx_cluster[idx_batch.reshape(-1), index_down.reshape(-1)] = idx_tmp.reshape(-1)
 
     # merge tokens
-    token_weight = x.new_ones(B, N, 1)
-    
     idx_batch = torch.arange(B, device=x.device)[:, None]
-    idx = idx_cluster + idx_batch * cluster_num     
+    idx = idx_cluster + idx_batch * cluster_num
 
+    # token_weight = x.new_ones(B, N, 1).float()
+    token_weight = torch.ones(B, N, 1)
     all_weight = token_weight.new_zeros(B * cluster_num, 1)
-    all_weight.index_add_(dim=0, index=idx.reshape(B * N),      
-                            source=token_weight.reshape(B * N, 1))      
+    all_weight.index_add_(dim=0, index=idx.reshape(B * N).cpu(), source=token_weight.reshape(B * N, 1))
     all_weight = all_weight + 1e-6
-    norm_weight = token_weight / all_weight[idx]       
 
     # average token features
-    x_merged = x.new_zeros(B * cluster_num, C)
-    source = x * norm_weight
-    x_merged.index_add_(dim=0, index=idx.reshape(B * N),        
-                        source=source.reshape(B * N, C).type(x.dtype))
+    norm_weight = token_weight / all_weight[idx.cpu()]
+    x_source = x.cpu() * norm_weight
+
+    # x_merged = x.new_zeros(B * cluster_num, C).float()
+    x_merged = torch.zeros(B * cluster_num, C)
+    x_merged.index_add_(dim=0, index=idx.reshape(B * N).cpu(), source=x_source.reshape(B * N, C))
     x_merged = x_merged.reshape(B, cluster_num, C)
     
-    return x_merged
+    return x_merged.to(device=x.device, dtype=x.dtype)
 
 
 class SparseLlamaModel(LlamaModel):
