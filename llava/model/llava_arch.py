@@ -139,7 +139,7 @@ class LlavaMetaForCausalLM(ABC):
         return self.get_model().get_vision_tower()
 
     def encode_images(self, images):
-        if 'prumerge' in self.pruning_method:
+        if 'prumerge' in self.pruning_method or self.pruning_method == 'visionzip':
             image_features, image_attentions = self.get_model().get_vision_tower()(images, output_attentions=True)
         else:
             image_features = self.get_model().get_vision_tower()(images)
@@ -204,6 +204,41 @@ class LlavaMetaForCausalLM(ABC):
             extra_weight = pruned_attn / torch.sum(pruned_attn, dim=1, keepdim=True)
             extra_feat = torch.sum(pruned_feat * extra_weight.unsqueeze(-1), dim=1, keepdim=True)
             image_features = torch.cat([updated_feat, extra_feat], dim=1)
+        
+        elif self.pruning_method == 'visionzip':
+            B, N, C = image_features.shape
+            device = image_features.device
+            dominant_token_num = int(self.visual_token_num * 27 / 32)
+            contextual_token_num = self.visual_token_num - dominant_token_num
+
+            # dominant visual tokens
+            cls_attention = image_attentions.mean(dim=1)
+            topk_indices = cls_attention.topk(dominant_token_num, dim=1).indices
+            
+            mask = torch.ones_like(cls_attention, dtype=torch.bool).scatter_(1, topk_indices, False)
+            dominant_tokens = image_features.masked_select(~mask.unsqueeze(-1)).view(B, dominant_token_num, C)
+            
+            # filter
+            features_filtered = image_features[mask].view(B, N - dominant_token_num, C)
+            features_normalized = features_filtered / features_filtered.norm(dim=-1, keepdim=True)
+
+            # contextual visual tokens
+            target_step = max(1, features_normalized.shape[1] // contextual_token_num)
+            target_indices = torch.arange(0, features_normalized.shape[1], target_step, device=device)[:contextual_token_num]
+            target_tokens = features_normalized[:, target_indices, :]
+
+            tokens_to_merge = features_normalized[:, ~torch.isin(torch.arange(features_normalized.shape[1], device=device), target_indices), :]
+            similarity = torch.bmm(tokens_to_merge, target_tokens.transpose(1, 2))
+            assign_one_hot = features_filtered.new_zeros(B, tokens_to_merge.shape[1], contextual_token_num)
+            assign_one_hot.scatter_(2, similarity.argmax(dim=2).unsqueeze(-1), 1)
+            counts = assign_one_hot.sum(dim=1).clamp(min=1).unsqueeze(-1)
+            hidden_to_merge = features_filtered[:, ~torch.isin(torch.arange(features_filtered.shape[1], device=device), target_indices), :]
+            aggregated_hidden = torch.bmm(assign_one_hot.transpose(1, 2), hidden_to_merge) / counts
+            target_hidden = features_filtered[:, target_indices, :]
+            contextual_tokens = target_hidden + aggregated_hidden
+
+            # merge
+            image_features = torch.cat([dominant_tokens, contextual_tokens], dim=1)
         
         image_features = self.get_model().mm_projector(image_features)
         return image_features, image_features.shape[1]
