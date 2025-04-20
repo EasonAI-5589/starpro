@@ -17,6 +17,7 @@ from abc import ABC, abstractmethod
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from .multimodal_encoder.builder import build_vision_tower
 from .multimodal_projector.builder import build_vision_projector
@@ -138,7 +139,72 @@ class LlavaMetaForCausalLM(ABC):
         return self.get_model().get_vision_tower()
 
     def encode_images(self, images):
-        image_features = self.get_model().get_vision_tower()(images)
+        if 'prumerge' in self.pruning_method:
+            image_features, image_attentions = self.get_model().get_vision_tower()(images, output_attentions=True)
+        else:
+            image_features = self.get_model().get_vision_tower()(images)
+        
+        if 'prumerge' in self.pruning_method:
+            B, N, C = image_features.shape
+            cls_attn = image_attentions.mean(dim=1)
+
+            if self.pruning_method == 'prumerge':
+                selected_idx = cls_attn.topk(k=self.visual_token_num-1, dim=1).indices
+            elif self.pruning_method == 'prumerge+':
+                selected_idx = cls_attn.topk(k=self.visual_token_num//2-1, dim=1).indices
+                step_length = int(N / self.visual_token_num * 2)
+                arithmetic_idx = torch.arange(int(step_length/2), 575, int(step_length), device=image_features.device)
+                selected_idx = torch.cat([selected_idx, arithmetic_idx.unsqueeze(0).expand(B, -1)], dim=1)
+            
+            select_tokens = torch.zeros_like(cls_attn, dtype=torch.bool)
+            select_tokens.scatter_(1, selected_idx, True)
+            pruned_idx = select_tokens.float().topk(k=N-self.visual_token_num+1, dim=1, largest=False).indices
+
+            selected_feat = torch.gather(image_features, dim=1, index=selected_idx.unsqueeze(-1).expand(-1, -1, C))
+            selected_attn = torch.gather(cls_attn, dim=1, index=selected_idx)
+            pruned_feat = torch.gather(image_features, dim=1, index=pruned_idx.unsqueeze(-1).expand(-1, -1, C))
+            pruned_attn = torch.gather(cls_attn, dim=1, index=pruned_idx)
+
+            selected_norm = F.normalize(selected_feat, p=2, dim=-1)
+            pruned_norm = F.normalize(pruned_feat, p=2, dim=-1)
+
+            updated_feat = torch.zeros_like(selected_feat)
+            for b in range(B):
+                for i in range(updated_feat.shape[1]):
+                    center_norm = selected_norm[b, i, :].unsqueeze(0)
+                    others_norm = torch.cat([
+                        selected_norm[b, :i, :],
+                        selected_norm[b, i+1:, :],
+                        pruned_norm[b, :, :],
+                    ], dim=0)
+
+                    # calculate cosine similarity and get cluster centers
+                    cos_sim_matrix = center_norm @ others_norm.t()
+                    cluster_idx = torch.topk(cos_sim_matrix, k=32, dim=1).indices
+
+                    others_feat = torch.cat([
+                        selected_feat[b, :i, :],
+                        selected_feat[b, i+1:, :],
+                        pruned_feat[b, :, :],
+                    ], dim=0)
+                    others_attn = torch.cat([
+                        selected_attn[b, :i],
+                        selected_attn[b, i+1:],
+                        pruned_attn[b, :],
+                    ], dim=0)
+
+                    cluster_tokens = others_feat[cluster_idx.squeeze(), :]
+                    cluster_weights = others_attn[cluster_idx.squeeze()].unsqueeze(-1) # (1, 32, 1)
+
+                    # update cluster centers
+                    cluster_avg = torch.sum(cluster_tokens * cluster_weights, dim=0)
+                    cluster_center = cluster_avg + selected_feat[b, i, :] * (1 - torch.sum(cluster_weights))
+                    updated_feat[b, i, :] = cluster_center
+            
+            extra_weight = pruned_attn / torch.sum(pruned_attn, dim=1, keepdim=True)
+            extra_feat = torch.sum(pruned_feat * extra_weight.unsqueeze(-1), dim=1, keepdim=True)
+            image_features = torch.cat([updated_feat, extra_feat], dim=1)
+        
         image_features = self.get_model().mm_projector(image_features)
         return image_features, image_features.shape[1]
 

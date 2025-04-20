@@ -32,18 +32,26 @@ class CLIPVisionTower(nn.Module):
 
         self.is_loaded = True
 
-    def feature_select(self, image_forward_outs):
+    def feature_select(self, image_forward_outs, output_attentions=False):
         image_features = image_forward_outs.hidden_states[self.select_layer]
+        if output_attentions:
+            image_attentions = image_forward_outs.attentions[self.select_layer]
         if self.select_feature == 'patch':
             image_features = image_features[:, 1:]
+            if output_attentions:
+                image_attentions = image_attentions[:, :, 0, 1:]
         elif self.select_feature == 'cls_patch':
             image_features = image_features
+            if output_attentions:
+                image_attentions = image_attentions
         else:
             raise ValueError(f'Unexpected select feature: {self.select_feature}')
+        if output_attentions:
+            return image_features, image_attentions
         return image_features
 
     @torch.no_grad()
-    def forward(self, images):
+    def forward(self, images, output_attentions=False):
         if type(images) is list:
             image_features = []
             for image in images:
@@ -51,8 +59,14 @@ class CLIPVisionTower(nn.Module):
                 image_feature = self.feature_select(image_forward_out).to(image.dtype)
                 image_features.append(image_feature)
         else:
-            image_forward_outs = self.vision_tower(images.to(device=self.device, dtype=self.dtype), output_hidden_states=True)
-            image_features = self.feature_select(image_forward_outs).to(images.dtype)
+            image_forward_outs = self.vision_tower(images.to(device=self.device, dtype=self.dtype),
+                                                   output_hidden_states=True,
+                                                   output_attentions=output_attentions)
+            image_outputs = self.feature_select(image_forward_outs, output_attentions=output_attentions)
+            if output_attentions:
+                image_features = (image_outputs[0].to(images.dtype), image_outputs[1].to(images.dtype))
+            else:
+                image_features = image_outputs.to(images.dtype)
 
         return image_features
 

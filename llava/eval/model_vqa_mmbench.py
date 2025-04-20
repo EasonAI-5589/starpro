@@ -137,8 +137,9 @@ def eval_model(args):
                     # no_repeat_ngram_size=3,
                     max_new_tokens=1024,
                     use_cache=True)
-            visual_token_num = model.model.visual_token_num
-            data_bar.set_postfix(vtn=f"{visual_token_num}")
+                if hasattr(model.model, 'visual_token_num'):
+                    visual_token_num = model.visual_token_num
+                data_bar.set_postfix(vtn=f"{visual_token_num}")
 
             outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
 
