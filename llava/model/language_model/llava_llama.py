@@ -25,6 +25,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.generation.utils import GenerateOutput
 
 from .modeling_fastv_llama import FastVLlamaModel
+from .modeling_sparse_llama import SparseLlamaModel
 from ..llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
 
 
@@ -45,6 +46,13 @@ class FastVLlavaLlamaModel(LlavaMetaModel, FastVLlamaModel):
 
     def __init__(self, config: LlamaConfig, fastv_config: dict):
         super(FastVLlavaLlamaModel, self).__init__(config, fastv_config=fastv_config)
+
+
+class SparseLlavaLlamaModel(LlavaMetaModel, SparseLlamaModel):
+    # Alter LlavaLlamaModel to SparseLlavaLlamaModel
+    config_class = LlavaLlamaConfig
+    def __init__(self, config: LlamaConfig, sparsevlm_config: dict):
+        super(SparseLlavaLlamaModel, self).__init__(config, sparsevlm_config=sparsevlm_config)
 
 
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):

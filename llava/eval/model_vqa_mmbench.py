@@ -64,11 +64,14 @@ def eval_model(args):
 
     use_fastv = True if args.pruning_method == "fastv" else False
     fastv_config = {"K": 1, "T": args.visual_token_num}
+    use_sparsevlm = True if args.pruning_method == "sparsevlm" else False
+    sparsevlm_config = {"T": args.visual_token_num}
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
         visual_token_num=args.visual_token_num,
-        use_fastv=use_fastv, fastv_config=fastv_config
+        use_fastv=use_fastv, fastv_config=fastv_config,
+        use_sparsevlm=use_sparsevlm, sparsevlm_config=sparsevlm_config,
     )
 
     # Data
