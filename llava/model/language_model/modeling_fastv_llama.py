@@ -8,16 +8,16 @@ from transformers.modeling_outputs import BaseModelOutputWithPast
 
 R_dict = {
     192: {
-        2: 166,
-        3: 152,
+        1: 166,
+        2: 152,
     },
     128: {
-        2: 98,
-        3: 81,
+        1: 98,
+        2: 81,
     },
     64: {
-        2: 29,
-        3: 11,
+        1: 29,
+        2: 11,
     },
 }
 
@@ -140,22 +140,21 @@ class FastVLlamaModel(LlamaModel):
                 )
             else:
                 # FastV
-                assert self.K > 0, "K should be greater than 0"
-
                 if seq_length > 1:
-                    if decoder_layer.self_attn.layer_idx == self.K - 1:
-                        temp_outputs = decoder_layer(
+                    visual_token_num += visual_token_length
+                    if decoder_layer.self_attn.layer_idx == self.K:
+                        attn_mask = torch.ones((batch_size, hidden_states.shape[1]), device=hidden_states.device)
+                        attn_mask = _prepare_4d_causal_attention_mask(attn_mask, (batch_size, hidden_states.shape[1]), hidden_states, 0)
+                        layer_outputs = decoder_layer(
                             hidden_states,
-                            attention_mask=attention_mask,
+                            attention_mask=attn_mask,
                             position_ids=position_ids,
-                            past_key_value=None,
+                            past_key_value=past_key_values,
                             output_attentions=True,
-                            use_cache=False,
+                            use_cache=use_cache,
                         )
-                        last_attention = temp_outputs[1]
-                    
-                    elif decoder_layer.self_attn.layer_idx == self.K:
-                        assert last_attention is not None, "last_attentions should be calculated"
+                        hidden_states = layer_outputs[0]
+                        last_attention = layer_outputs[1]
 
                         device = hidden_states.device
                         image_attention = last_attention.mean(dim=1)[0, -1, self.system_prompt_length:self.system_prompt_length+self.visual_token_length] # (N)
@@ -171,20 +170,29 @@ class FastVLlamaModel(LlamaModel):
 
                         # get tokens by index
                         hidden_states = hidden_states[:,full_token_index]
-                        if attention_mask is not None:
-                            attention_mask = attention_mask[:,:,:hidden_states.shape[1],:hidden_states.shape[1]]
                         position_ids = full_token_index.unsqueeze(0)
-                    
-                    visual_token_num += visual_token_length
 
-                layer_outputs = decoder_layer(
-                    hidden_states,
-                    attention_mask=attention_mask,
-                    position_ids=position_ids,
-                    past_key_value=past_key_values,
-                    output_attentions=output_attentions,
-                    use_cache=use_cache,
-                )
+                        layer_outputs = (hidden_states, layer_outputs[2])
+                    
+                    else:
+                        layer_outputs = decoder_layer(
+                            hidden_states,
+                            attention_mask=attention_mask,
+                            position_ids=position_ids,
+                            past_key_value=past_key_values,
+                            output_attentions=output_attentions,
+                            use_cache=use_cache,
+                        )
+                
+                else:
+                    layer_outputs = decoder_layer(
+                        hidden_states,
+                        attention_mask=attention_mask,
+                        position_ids=position_ids,
+                        past_key_value=past_key_values,
+                        output_attentions=output_attentions,
+                        use_cache=use_cache,
+                    )
 
             hidden_states = layer_outputs[0]
 

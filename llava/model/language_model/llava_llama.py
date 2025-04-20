@@ -24,7 +24,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, \
 from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.generation.utils import GenerateOutput
 
-from .modeling_fastv import FastVLlamaModel
+from .modeling_fastv_llama import FastVLlamaModel
 from ..llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
 
 
@@ -51,11 +51,15 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaLlamaConfig
 
     def __init__(self, config, pruning_method=None, visual_token_num=None, 
-                 use_fastv=False, fastv_config=None):
+                 use_fastv=False, fastv_config=None,
+                 use_sparsevlm=False, sparsevlm_config=None):
         super(LlamaForCausalLM, self).__init__(config)
         if use_fastv:
             print(f"Use FastV: {fastv_config}")
             self.model = FastVLlavaLlamaModel(config, fastv_config)
+        elif use_sparsevlm:
+            print(f"Use SparseVLM: {sparsevlm_config}")
+            self.model = SparseLlavaLlamaModel(config, sparsevlm_config=sparsevlm_config)
         else:
             self.model = LlavaLlamaModel(config)
         

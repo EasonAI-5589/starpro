@@ -88,7 +88,7 @@ def eval_model(args):
     model_name = get_model_name_from_path(model_path)
 
     use_fastv = True if args.pruning_method == "fastv" else False
-    fastv_config = {"K": 2, "T": args.visual_token_num}
+    fastv_config = {"K": 1, "T": args.visual_token_num}
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
