@@ -4,6 +4,10 @@ import torch.nn as nn
 from transformers import CLIPVisionConfig, CLIPImageProcessor, CLIPVisionModel
 
 
+def hook_k(module, input, output):
+    module.k_output = output
+
+
 class CLIPVisionTower(nn.Module):
     def __init__(self, vision_tower, args, delay_load=False):
         super().__init__()
@@ -59,12 +63,20 @@ class CLIPVisionTower(nn.Module):
                 image_feature = self.feature_select(image_forward_out).to(image.dtype)
                 image_features.append(image_feature)
         else:
+            if output_attentions:
+                hook_handle_k = self.vision_tower.vision_model.encoder.layers[self.select_layer].self_attn.k_proj.register_forward_hook(hook_k)
             image_forward_outs = self.vision_tower(images.to(device=self.device, dtype=self.dtype),
                                                    output_hidden_states=True,
                                                    output_attentions=output_attentions)
             image_outputs = self.feature_select(image_forward_outs, output_attentions=output_attentions)
             if output_attentions:
-                image_features = (image_outputs[0].to(images.dtype), image_outputs[1].to(images.dtype))
+                image_features = (
+                    image_outputs[0].to(images.dtype),
+                    image_outputs[1].to(images.dtype),
+                    self.vision_tower.vision_model.encoder.layers[self.select_layer].self_attn.k_proj.k_output.to(images.dtype),
+                    image_forward_outs.hidden_states[self.select_layer][:, :1].to(images.dtype),
+                )
+                hook_handle_k.remove()
             else:
                 image_features = image_outputs.to(images.dtype)
 

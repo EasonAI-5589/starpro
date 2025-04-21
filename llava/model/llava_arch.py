@@ -140,7 +140,7 @@ class LlavaMetaForCausalLM(ABC):
 
     def encode_images(self, images):
         if 'prumerge' in self.pruning_method or self.pruning_method == 'visionzip':
-            image_features, image_attentions = self.get_model().get_vision_tower()(images, output_attentions=True)
+            image_features, image_attentions, image_keys, image_cls = self.get_model().get_vision_tower()(images, output_attentions=True)
         else:
             image_features = self.get_model().get_vision_tower()(images)
         
@@ -160,13 +160,19 @@ class LlavaMetaForCausalLM(ABC):
             select_tokens.scatter_(1, selected_idx, True)
             pruned_idx = select_tokens.float().topk(k=N-self.visual_token_num+1, dim=1, largest=False).indices
 
+            image_keys = image_keys[:, 1:]
+
             selected_feat = torch.gather(image_features, dim=1, index=selected_idx.unsqueeze(-1).expand(-1, -1, C))
+            selected_key = torch.gather(image_keys, dim=1, index=selected_idx.unsqueeze(-1).expand(-1, -1, C))
             selected_attn = torch.gather(cls_attn, dim=1, index=selected_idx)
             pruned_feat = torch.gather(image_features, dim=1, index=pruned_idx.unsqueeze(-1).expand(-1, -1, C))
+            pruned_key = torch.gather(image_keys, dim=1, index=pruned_idx.unsqueeze(-1).expand(-1, -1, C))
             pruned_attn = torch.gather(cls_attn, dim=1, index=pruned_idx)
 
-            selected_norm = F.normalize(selected_feat, p=2, dim=-1)
-            pruned_norm = F.normalize(pruned_feat, p=2, dim=-1)
+            # selected_norm = F.normalize(selected_feat, p=2, dim=-1)
+            # pruned_norm = F.normalize(pruned_feat, p=2, dim=-1)
+            selected_norm = F.normalize(selected_key, p=2, dim=-1)
+            pruned_norm = F.normalize(pruned_key, p=2, dim=-1)
 
             updated_feat = torch.zeros_like(selected_feat)
             for b in range(B):
@@ -208,8 +214,8 @@ class LlavaMetaForCausalLM(ABC):
         elif self.pruning_method == 'visionzip':
             B, N, C = image_features.shape
             device = image_features.device
-            dominant_token_num = int(self.visual_token_num * 27 / 32)
-            contextual_token_num = self.visual_token_num - dominant_token_num
+            dominant_token_num = int(self.visual_token_num * 27 / 32) - 1
+            contextual_token_num = self.visual_token_num - dominant_token_num - 1
 
             # dominant visual tokens
             cls_attention = image_attentions.mean(dim=1)
@@ -217,17 +223,19 @@ class LlavaMetaForCausalLM(ABC):
             
             mask = torch.ones_like(cls_attention, dtype=torch.bool).scatter_(1, topk_indices, False)
             dominant_tokens = image_features.masked_select(~mask.unsqueeze(-1)).view(B, dominant_token_num, C)
+            dominant_tokens = torch.cat([image_cls, dominant_tokens], dim=1)
             
             # filter
-            features_filtered = image_features[mask].view(B, N - dominant_token_num, C)
-            features_normalized = features_filtered / features_filtered.norm(dim=-1, keepdim=True)
+            features_filtered = image_features.masked_select(mask.unsqueeze(-1)).view(B, N - dominant_token_num, C)
+            metric_filtered = image_keys[:, 1:][mask].view(B, N - dominant_token_num, C)
+            metric_normalized = metric_filtered / metric_filtered.norm(dim=-1, keepdim=True)
 
             # contextual visual tokens
-            target_step = max(1, features_normalized.shape[1] // contextual_token_num)
-            target_indices = torch.arange(0, features_normalized.shape[1], target_step, device=device)[:contextual_token_num]
-            target_tokens = features_normalized[:, target_indices, :]
+            target_step = max(1, metric_normalized.shape[1] // contextual_token_num)
+            target_indices = torch.arange(0, metric_normalized.shape[1], target_step, device=device)[:contextual_token_num]
+            target_tokens = metric_normalized[:, target_indices, :]
 
-            tokens_to_merge = features_normalized[:, ~torch.isin(torch.arange(features_normalized.shape[1], device=device), target_indices), :]
+            tokens_to_merge = metric_normalized[:, ~torch.isin(torch.arange(metric_normalized.shape[1], device=device), target_indices), :]
             similarity = torch.bmm(tokens_to_merge, target_tokens.transpose(1, 2))
             assign_one_hot = features_filtered.new_zeros(B, tokens_to_merge.shape[1], contextual_token_num)
             assign_one_hot.scatter_(2, similarity.argmax(dim=2).unsqueeze(-1), 1)
