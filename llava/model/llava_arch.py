@@ -248,6 +248,22 @@ class LlavaMetaForCausalLM(ABC):
             # merge
             image_features = torch.cat([dominant_tokens, contextual_tokens], dim=1)
         
+        elif self.pruning_method == 'divprune':
+            device = image_features.device
+
+            image_normalized = image_features.squeeze(0) / image_features.squeeze(0).norm(dim=-1, keepdim=True)
+            cosine_matrix = 1.0 - torch.mm(image_normalized, image_normalized.t())
+            
+            select_idx = torch.empty(self.visual_token_num, dtype=torch.long, device=device)
+            for i in range(self.visual_token_num):
+                m2 = cosine_matrix if i==0 else cosine_matrix[select_idx[:i]]
+                scores = torch.topk(m2, 2, dim=0, largest=False).values[1] \
+                    if i==0 else torch.min(m2, dim=0).values
+                select_idx[i] = torch.argmax(scores)
+            
+            select_idx = torch.sort(select_idx).values
+            image_features = image_features[:, select_idx, :]
+        
         image_features = self.get_model().mm_projector(image_features)
         return image_features, image_features.shape[1]
 
