@@ -25,7 +25,7 @@ from transformers.modeling_outputs import CausalLMOutputWithPast
 from transformers.generation.utils import GenerateOutput
 
 from .modeling_llama_fastv import FastVLlamaModel
-from .modeling_sparse_llama import SparseLlamaModel
+from .modeling_llama_sparsevlm import SparseLlamaModel
 from ..llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
 
 
