@@ -229,6 +229,7 @@ class SparseLlamaModel(LlamaModel):
                 # SparseVLM
                 if seq_length > 1:
                     visual_token_num += visual_token_length
+                    
                     if decoder_layer.self_attn.layer_idx in self.pruning_loc:
                         attn_mask = torch.ones((batch_size, hidden_states.shape[1]), device=hidden_states.device)
                         attn_mask = _prepare_4d_causal_attention_mask(attn_mask, (batch_size, hidden_states.shape[1]), hidden_states, 0)
