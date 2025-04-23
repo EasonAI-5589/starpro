@@ -91,12 +91,15 @@ def eval_model(args):
     fastv_config = {"K": 1, "T": args.visual_token_num}
     use_sparsevlm = True if args.pruning_method == "sparsevlm" else False
     sparsevlm_config = {"T": args.visual_token_num}
+    use_pdrop = True if args.pruning_method == "pdrop" else False
+    pdrop_config = {"T": args.visual_token_num}
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
         visual_token_num=args.visual_token_num,
         use_fastv=use_fastv, fastv_config=fastv_config,
         use_sparsevlm=use_sparsevlm, sparsevlm_config=sparsevlm_config,
+        use_pdrop=use_pdrop, pdrop_config=pdrop_config,
     )
 
     # Data
@@ -132,7 +135,7 @@ def eval_model(args):
                 max_new_tokens=args.max_new_tokens,
                 use_cache=True)
             if hasattr(model.model, 'visual_token_num'):
-                visual_token_num = model.visual_token_num
+                visual_token_num = model.model.visual_token_num
             data_bar.set_postfix(vtn=f"{visual_token_num}")
 
         outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()

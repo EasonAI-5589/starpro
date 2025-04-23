@@ -26,6 +26,7 @@ from transformers.generation.utils import GenerateOutput
 
 from .modeling_llama_fastv import FastVLlamaModel
 from .modeling_llama_sparsevlm import SparseLlamaModel
+from .modeling_llama_pdrop import PDropLlamaModel
 from ..llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
 
 
@@ -55,12 +56,20 @@ class SparseLlavaLlamaModel(LlavaMetaModel, SparseLlamaModel):
         super(SparseLlavaLlamaModel, self).__init__(config, sparsevlm_config=sparsevlm_config)
 
 
+class PDropLlavaLlamaModel(LlavaMetaModel, PDropLlamaModel):
+    # Alter LlavaLlamaModel to PDropLlavaLlamaModel
+    config_class = LlavaLlamaConfig
+    def __init__(self, config: LlamaConfig, pdrop_config: dict):
+        super(PDropLlavaLlamaModel, self).__init__(config, pdrop_config=pdrop_config)
+
+
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaLlamaConfig
 
     def __init__(self, config, pruning_method=None, visual_token_num=None, 
                  use_fastv=False, fastv_config=None,
-                 use_sparsevlm=False, sparsevlm_config=None):
+                 use_sparsevlm=False, sparsevlm_config=None,
+                 use_pdrop=False, pdrop_config=None):
         super(LlamaForCausalLM, self).__init__(config)
         if use_fastv:
             print(f"Use FastV: {fastv_config}")
@@ -68,6 +77,9 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         elif use_sparsevlm:
             print(f"Use SparseVLM: {sparsevlm_config}")
             self.model = SparseLlavaLlamaModel(config, sparsevlm_config=sparsevlm_config)
+        elif use_pdrop:
+            print(f"Use PDrop: {pdrop_config}")
+            self.model = PDropLlavaLlamaModel(config, pdrop_config=pdrop_config)
         else:
             self.model = LlavaLlamaModel(config)
         
