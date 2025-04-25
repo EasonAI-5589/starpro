@@ -43,6 +43,7 @@ def eval_model(args):
     sparsevlm_config = {"T": args.visual_token_num}
     use_pdrop = True if args.pruning_method == "pdrop" else False
     pdrop_config = {"T": args.visual_token_num}
+    use_text_tower = True if args.pruning_method == "trim" else False
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
@@ -50,6 +51,7 @@ def eval_model(args):
         use_fastv=use_fastv, fastv_config=fastv_config,
         use_sparsevlm=use_sparsevlm, sparsevlm_config=sparsevlm_config,
         use_pdrop=use_pdrop, pdrop_config=pdrop_config,
+        use_text_tower=use_text_tower,
     )
 
     # Data
@@ -90,6 +92,11 @@ def eval_model(args):
         conv.append_message(conv.roles[1], None)
         prompt = conv.get_prompt()
 
+        question = cur_prompt.replace("<image>\n", "")
+        # question = question.split('\nA. ')[0]
+        # question = question.split('\n')[-1]
+        question = question.replace("\nAnswer with the option's letter from the given choices directly.", "")
+
         input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
 
         with torch.inference_mode():
@@ -97,6 +104,7 @@ def eval_model(args):
                 input_ids,
                 images=images,
                 image_sizes=image_sizes,
+                texts=question,
                 do_sample=True if args.temperature > 0 else False,
                 temperature=args.temperature,
                 max_new_tokens=1024,

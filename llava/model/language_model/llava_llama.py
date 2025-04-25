@@ -69,7 +69,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     def __init__(self, config, pruning_method=None, visual_token_num=None, 
                  use_fastv=False, fastv_config=None,
                  use_sparsevlm=False, sparsevlm_config=None,
-                 use_pdrop=False, pdrop_config=None):
+                 use_pdrop=False, pdrop_config=None, **kwargs):
         super(LlamaForCausalLM, self).__init__(config)
         if use_fastv:
             print(f"Use FastV: {fastv_config}")
@@ -158,6 +158,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         inputs: Optional[torch.Tensor] = None,
         images: Optional[torch.Tensor] = None,
         image_sizes: Optional[torch.Tensor] = None,
+        texts: Optional[str] = None,
         **kwargs,
     ) -> Union[GenerateOutput, torch.LongTensor]:
         position_ids = kwargs.pop("position_ids", None)
@@ -181,10 +182,9 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 None,
                 None,
                 images,
-                image_sizes=image_sizes
+                image_sizes=image_sizes,
+                texts=texts
             )
-            if self.pruning_method == "fastv":
-                visual_token_num = self.visual_token_num
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
             visual_token_num = 0
@@ -200,6 +200,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                                       inputs_embeds=None, **kwargs):
         images = kwargs.pop("images", None)
         image_sizes = kwargs.pop("image_sizes", None)
+        texts = kwargs.pop("texts", None)
         inputs = super().prepare_inputs_for_generation(
             input_ids, past_key_values=past_key_values, inputs_embeds=inputs_embeds, **kwargs
         )
@@ -207,6 +208,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs['images'] = images
         if image_sizes is not None:
             inputs['image_sizes'] = image_sizes
+        if texts is not None:
+            inputs['texts'] = texts
         return inputs
 
 AutoConfig.register("llava_llama", LlavaLlamaConfig)

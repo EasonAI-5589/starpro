@@ -93,6 +93,7 @@ def eval_model(args):
     sparsevlm_config = {"T": args.visual_token_num}
     use_pdrop = True if args.pruning_method == "pdrop" else False
     pdrop_config = {"T": args.visual_token_num}
+    use_text_tower = True if args.pruning_method == "trim" else False
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
@@ -100,6 +101,7 @@ def eval_model(args):
         use_fastv=use_fastv, fastv_config=fastv_config,
         use_sparsevlm=use_sparsevlm, sparsevlm_config=sparsevlm_config,
         use_pdrop=use_pdrop, pdrop_config=pdrop_config,
+        use_text_tower=use_text_tower,
     )
 
     # Data
@@ -120,6 +122,10 @@ def eval_model(args):
         idx = line["question_id"]
         cur_prompt = line["text"]
 
+        question = cur_prompt
+        # question = question.split("\nReference OCR token")[0]
+        question = question.replace("\nAnswer the question using a single word or phrase.", "")
+
         input_ids = input_ids.to(device='cuda', non_blocking=True)
         image_tensors = image_tensors.to(dtype=torch.float16, device='cuda', non_blocking=True)
 
@@ -128,6 +134,7 @@ def eval_model(args):
                 input_ids,
                 images=image_tensors,
                 image_sizes=image_sizes,
+                texts=question,
                 do_sample=True if args.temperature > 0 else False,
                 temperature=args.temperature,
                 top_p=args.top_p,

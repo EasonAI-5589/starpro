@@ -138,9 +138,11 @@ class LlavaMetaForCausalLM(ABC):
     def get_vision_tower(self):
         return self.get_model().get_vision_tower()
 
-    def encode_images(self, images):
+    def encode_images(self, images, texts=None):
         if 'prumerge' in self.pruning_method or self.pruning_method == 'visionzip':
             image_features, image_attentions, image_keys, image_cls = self.get_model().get_vision_tower()(images, output_attentions=True)
+        elif self.pruning_method == 'trim':
+            image_features, image_embeds, text_embeds = self.get_model().get_vision_tower()(images, texts=texts)
         else:
             image_features = self.get_model().get_vision_tower()(images)
         
@@ -248,6 +250,23 @@ class LlavaMetaForCausalLM(ABC):
             # merge
             image_features = torch.cat([dominant_tokens, contextual_tokens], dim=1)
         
+        elif self.pruning_method == 'trim':
+            image_embeds = image_embeds / image_embeds.norm(dim=-1, keepdim=True)
+            text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
+            similarity = -torch.matmul(image_embeds.squeeze(), text_embeds.t())
+            similarity = similarity.mean(dim=-1)
+            # similarity = similarity.max(dim=-1).values
+
+            # select topk tokens by similarity scores
+            topk_indices = similarity.topk(self.visual_token_num - 1, dim=-1).indices
+            selected_tokens = image_features[:, topk_indices, :]
+
+            # aggregate the remaining tokens
+            remaining_mask = torch.ones_like(similarity, dtype=torch.bool).scatter_(0, topk_indices, False)
+            aggregated_token = image_features[:, remaining_mask, :].mean(dim=1, keepdim=True)
+
+            image_features = torch.cat([selected_tokens, aggregated_token], dim=1)
+        
         elif self.pruning_method == 'divprune':
             device = image_features.device
 
@@ -269,7 +288,7 @@ class LlavaMetaForCausalLM(ABC):
 
     def prepare_inputs_labels_for_multimodal(
         self, input_ids, position_ids, attention_mask, past_key_values, labels,
-        images, image_sizes=None
+        images, image_sizes=None, texts=None
     ):
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
@@ -324,7 +343,7 @@ class LlavaMetaForCausalLM(ABC):
             else:
                 raise ValueError(f"Unexpected mm_patch_merge_type: {self.config.mm_patch_merge_type}")
         else:
-            image_features, visual_token_num = self.encode_images(images)
+            image_features, visual_token_num = self.encode_images(images, texts=texts)
 
         # TODO: image start / end is not implemented here to support pretraining.
         if getattr(self.config, 'tune_mm_mlp_adapter', False) and getattr(self.config, 'mm_use_im_start_end', False):

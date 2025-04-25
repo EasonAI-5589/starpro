@@ -68,6 +68,7 @@ def eval_model(args):
     sparsevlm_config = {"T": args.visual_token_num}
     use_pdrop = True if args.pruning_method == "pdrop" else False
     pdrop_config = {"T": args.visual_token_num}
+    use_text_tower = True if args.pruning_method == "trim" else False
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
@@ -75,6 +76,7 @@ def eval_model(args):
         use_fastv=use_fastv, fastv_config=fastv_config,
         use_sparsevlm=use_sparsevlm, sparsevlm_config=sparsevlm_config,
         use_pdrop=use_pdrop, pdrop_config=pdrop_config,
+        use_text_tower=use_text_tower,
     )
 
     # Data
@@ -116,13 +118,18 @@ def eval_model(args):
             if args.single_pred_prompt:
                 if args.lang == 'cn':
                     qs = qs + '\n' + "请直接回答选项字母。"
+                    # cur_prompt = cur_prompt + '\n' + "请直接回答选项字母。"
                 else:
                     qs = qs + '\n' + "Answer with the option's letter from the given choices directly."
+                    # cur_prompt = cur_prompt + '\n' + "Answer with the option's letter from the given choices directly."
 
             conv = conv_templates[args.conv_mode].copy()
             conv.append_message(conv.roles[0], qs)
             conv.append_message(conv.roles[1], None)
             prompt = conv.get_prompt()
+
+            question = cur_prompt
+            # question = row['question']
 
             input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
 
@@ -133,6 +140,7 @@ def eval_model(args):
                     input_ids,
                     images=image_tensor.unsqueeze(0).half().cuda(),
                     image_sizes=[image.size],
+                    texts=question,
                     do_sample=True if args.temperature > 0 else False,
                     temperature=args.temperature,
                     top_p=args.top_p,

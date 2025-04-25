@@ -1,7 +1,10 @@
 import torch
 import torch.nn as nn
 
-from transformers import CLIPVisionConfig, CLIPImageProcessor, CLIPVisionModel
+from transformers import (
+    CLIPVisionConfig, CLIPImageProcessor, CLIPVisionModel, CLIPVisionModelWithProjection,
+    CLIPTextConfig, CLIPTokenizerFast, CLIPTextModel, CLIPTextModelWithProjection,
+)
 
 
 def hook_k(module, input, output):
@@ -25,14 +28,21 @@ class CLIPVisionTower(nn.Module):
         else:
             self.cfg_only = CLIPVisionConfig.from_pretrained(self.vision_tower_name)
 
-    def load_model(self, device_map=None):
+    def load_model(self, device_map=None, text_tower=False):
         if self.is_loaded:
             print('{} is already loaded, `load_model` called again, skipping.'.format(self.vision_tower_name))
             return
 
         self.image_processor = CLIPImageProcessor.from_pretrained(self.vision_tower_name)
-        self.vision_tower = CLIPVisionModel.from_pretrained(self.vision_tower_name, device_map=device_map)
+        self.vision_tower = CLIPVisionModelWithProjection.from_pretrained(self.vision_tower_name, device_map=device_map)
         self.vision_tower.requires_grad_(False)
+
+        if text_tower:
+            self.text_tokenizer = CLIPTokenizerFast.from_pretrained(self.vision_tower_name)
+            self.text_tower = CLIPTextModelWithProjection.from_pretrained(self.vision_tower_name, device_map=device_map)
+            self.text_tower.requires_grad_(False)
+
+            self.max_position_embeddings = self.text_tower.config.max_position_embeddings
 
         self.is_loaded = True
 
@@ -55,7 +65,7 @@ class CLIPVisionTower(nn.Module):
         return image_features
 
     @torch.no_grad()
-    def forward(self, images, output_attentions=False):
+    def forward(self, images, texts=None, output_attentions=False):
         if type(images) is list:
             image_features = []
             for image in images:
@@ -63,22 +73,42 @@ class CLIPVisionTower(nn.Module):
                 image_feature = self.feature_select(image_forward_out).to(image.dtype)
                 image_features.append(image_feature)
         else:
-            if output_attentions:
-                hook_handle_k = self.vision_tower.vision_model.encoder.layers[self.select_layer].self_attn.k_proj.register_forward_hook(hook_k)
-            image_forward_outs = self.vision_tower(images.to(device=self.device, dtype=self.dtype),
-                                                   output_hidden_states=True,
-                                                   output_attentions=output_attentions)
-            image_outputs = self.feature_select(image_forward_outs, output_attentions=output_attentions)
-            if output_attentions:
-                image_features = (
-                    image_outputs[0].to(images.dtype),
-                    image_outputs[1].to(images.dtype),
-                    self.vision_tower.vision_model.encoder.layers[self.select_layer].self_attn.k_proj.k_output.to(images.dtype),
-                    image_forward_outs.hidden_states[self.select_layer][:, :1].to(images.dtype),
-                )
-                hook_handle_k.remove()
-            else:
-                image_features = image_outputs.to(images.dtype)
+            image_stream = torch.cuda.Stream()
+            text_stream = torch.cuda.Stream()
+            
+            with torch.cuda.stream(image_stream):
+                if output_attentions:
+                    hook_handle_k = self.vision_tower.vision_model.encoder.layers[self.select_layer].self_attn.k_proj.register_forward_hook(hook_k)
+                image_forward_outs = self.vision_tower(images.to(device=self.device, dtype=self.dtype),
+                                                    output_hidden_states=True,
+                                                    output_attentions=output_attentions)
+                image_outputs = self.feature_select(image_forward_outs, output_attentions=output_attentions)
+                if output_attentions:
+                    image_features = (
+                        image_outputs[0].to(images.dtype),
+                        image_outputs[1].to(images.dtype),
+                        self.vision_tower.vision_model.encoder.layers[self.select_layer].self_attn.k_proj.k_output.to(images.dtype),
+                        image_forward_outs.hidden_states[self.select_layer][:, :1].to(images.dtype),
+                    )
+                    hook_handle_k.remove()
+                else:
+                    image_features = image_outputs.to(images.dtype)
+            
+            if texts is not None:
+                with torch.cuda.stream(text_stream):
+                    text_inputs = self.text_tokenizer(text=texts, return_tensors="pt")
+                    text_segment = (text_inputs.input_ids.shape[1] - 1) // self.max_position_embeddings + 1
+                    text_padding = self.max_position_embeddings * text_segment - text_inputs.input_ids.shape[1]
+                    text_inputs = {
+                        k: torch.cat([v, v.new_zeros((v.shape[0], text_padding))], 
+                                     dim=1).reshape(-1, self.max_position_embeddings).to(device=self.device)
+                        for k, v in text_inputs.items()
+                    }
+                    text_embeds = self.text_tower(**text_inputs).text_embeds
+                torch.cuda.synchronize()
+                image_embeds = self.vision_tower.vision_model.post_layernorm(image_outputs)
+                image_embeds = self.vision_tower.visual_projection(image_embeds)
+                image_features = (image_features, image_embeds, text_embeds)
 
         return image_features
 
