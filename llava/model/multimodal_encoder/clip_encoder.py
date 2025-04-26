@@ -105,7 +105,10 @@ class CLIPVisionTower(nn.Module):
                         for k, v in text_inputs.items()
                     }
                     text_embeds = self.text_tower(**text_inputs).text_embeds
-                torch.cuda.synchronize()
+            
+            torch.cuda.synchronize()
+
+            if texts is not None:
                 image_embeds = self.vision_tower.vision_model.post_layernorm(image_outputs)
                 image_embeds = self.vision_tower.visual_projection(image_embeds)
                 image_features = (image_features, image_embeds, text_embeds)
