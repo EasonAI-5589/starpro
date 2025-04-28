@@ -267,10 +267,31 @@ class LlavaMetaForCausalLM(ABC):
 
             image_features = torch.cat([selected_tokens, aggregated_token], dim=1)
         
+        elif self.pruning_method == 'dart':
+            device = image_features.device
+
+            image_normalized = (image_features / image_features.norm(dim=-1, keepdim=True)).squeeze(0)
+            visual_token_num = (self.visual_token_num - 8) // 8
+
+            retained_set = set(range(64, 576, 64))
+            valid_set = set(range(576)) - retained_set
+            for pivot_idx in list(retained_set):
+                valid_list = list(valid_set)
+                cos_sim = torch.matmul(image_normalized[pivot_idx], image_normalized[valid_list].t())
+                topk_idx = torch.topk(cos_sim, k=visual_token_num, largest=False).indices
+
+                topk_real_idx = [valid_list[idx] for idx in topk_idx]
+                retained_set.update(topk_real_idx)
+                valid_set.difference_update(topk_real_idx)
+            
+            retained_idx = torch.tensor(list(retained_set), dtype=torch.long, device=device)
+            retained_set = torch.sort(retained_idx).values
+            image_features = image_features[:, retained_idx, :]
+        
         elif self.pruning_method == 'divprune':
             device = image_features.device
 
-            image_normalized = image_features.squeeze(0) / image_features.squeeze(0).norm(dim=-1, keepdim=True)
+            image_normalized = (image_features / image_features.norm(dim=-1, keepdim=True)).squeeze(0)
             cosine_matrix = 1.0 - torch.mm(image_normalized, image_normalized.t())
             
             select_idx = torch.empty(self.visual_token_num, dtype=torch.long, device=device)
