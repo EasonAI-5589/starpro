@@ -52,23 +52,18 @@ def get_options(row, options):
 
 
 def eval_model(args):
-    # Seed
-    torch.manual_seed(args.seed)
-    torch.cuda.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
-
     # Model
     disable_torch_init()
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(model_path)
 
     use_fastv = True if args.pruning_method == "fastv" else False
-    fastv_config = {"K": 1, "T": args.visual_token_num}
+    fastv_config = {"K": 2, "T": args.visual_token_num}
     use_sparsevlm = True if args.pruning_method == "sparsevlm" else False
     sparsevlm_config = {"T": args.visual_token_num}
     use_pdrop = True if args.pruning_method == "pdrop" else False
     pdrop_config = {"T": args.visual_token_num}
-    use_text_tower = True if args.pruning_method == "trim" else False
+    use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method else False
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
@@ -105,6 +100,7 @@ def eval_model(args):
             question = row['question']
             hint = row['hint']
             image = load_image_from_base64(row['image'])
+            # breakpoint()
             if not is_none(hint):
                 question = hint + '\n' + question
             for option_char, option in zip(all_options[:len(options)], options):
@@ -187,7 +183,6 @@ if __name__ == "__main__":
     parser.add_argument("--all-rounds", action="store_true")
     parser.add_argument("--single-pred-prompt", action="store_true")
     parser.add_argument("--lang", type=str, default="en")
-    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--pruning_method", type=str, default=None)
     parser.add_argument("--visual_token_num", type=int, default=576)
     args = parser.parse_args()

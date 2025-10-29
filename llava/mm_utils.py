@@ -24,6 +24,7 @@ def select_best_resolution(original_size, possible_resolutions):
     best_fit = None
     max_effective_resolution = 0
     min_wasted_resolution = float('inf')
+    possible_resolutions = [(672, 672)]
 
     for width, height in possible_resolutions:
         scale = min(width / original_width, height / original_height)

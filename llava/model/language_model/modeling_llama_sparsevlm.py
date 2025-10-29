@@ -8,21 +8,40 @@ from transformers.modeling_outputs import BaseModelOutputWithPast
 
 
 R_dict = {
-    192: {
-        1: 300,
-        5: 200,
-        14: 110,
+    "7b": {
+        2: {
+            192: 300,
+            128: 300,
+            64: 65,
+        },
+        6: {
+            192: 200,
+            128: 110,
+            64: 30, # 35
+        },
+        15: {
+            192: 110,
+            128: 35,
+            64: 15,
+        },
     },
-    128: {
-        1: 300,
-        5: 110,
-        14: 35,
-    },
-    64: {
-        1: 65,
-        5: 30,
-        14: 15,
-    },
+    "13b": {
+        2: {
+            192: 300,
+            128: 300,
+            64: 70,
+        },
+        8: {
+            192: 200,
+            128: 100,
+            64: 35,
+        },
+        20: {
+            192: 110,
+            128: 40,
+            64: 20,
+        },
+    }
 }
 
 
@@ -113,11 +132,25 @@ class SparseLlamaModel(LlamaModel):
     def __init__(self, config: LlamaConfig, sparsevlm_config: Dict):
         super().__init__(config)
         self.system_prompt_length = 35
-        self.visual_token_length = 576
         self.visual_token_num = 0
+        
+        if config.num_hidden_layers == 32:
+            self.scale = "7b"
+        elif config.num_hidden_layers == 40:
+            self.scale = "13b"
+
+        if config.image_aspect_ratio == "pad":
+            self.visual_token_length = 576
+            self.anyres = False
+        elif config.image_aspect_ratio == "anyres":
+            self.visual_token_length = 2880
+            self.anyres = True
 
         # SparseVLM config
-        self.pruning_loc = [1, 5, 14]
+        if config.num_hidden_layers == 32:
+            self.pruning_loc = [2, 6, 15]
+        elif config.num_hidden_layers == 40:
+            self.pruning_loc = [2, 8, 20]
         self.retained_num = sparsevlm_config["T"]
     
     def forward(
@@ -210,6 +243,7 @@ class SparseLlamaModel(LlamaModel):
 
             visual_token_length = self.visual_token_length
             visual_token_num = 0
+            visual_token_list = []
 
         for decoder_layer in self.layers:
             if output_hidden_states:
@@ -229,8 +263,9 @@ class SparseLlamaModel(LlamaModel):
                 # SparseVLM
                 if seq_length > 1:
                     visual_token_num += visual_token_length
+                    visual_token_list.append(visual_token_length)
                     
-                    if decoder_layer.self_attn.layer_idx in self.pruning_loc:
+                    if (decoder_layer.self_attn.layer_idx + 1) in self.pruning_loc:
                         attn_mask = torch.ones((batch_size, hidden_states.shape[1]), device=hidden_states.device)
                         attn_mask = _prepare_4d_causal_attention_mask(attn_mask, (batch_size, hidden_states.shape[1]), hidden_states, 0)
                         layer_outputs = decoder_layer(
@@ -249,21 +284,22 @@ class SparseLlamaModel(LlamaModel):
                         cross_attn_weights = cross_attn_weights.mean(1)
 
                         retained_visual_tokens = torch.zeros_like(cross_attn_weights, dtype=bool)
+                        dynamic_res = 5 if self.anyres else 1
                         retained_visual_index = torch.topk(
                             cross_attn_weights, 
-                            min(R_dict[self.retained_num][decoder_layer.self_attn.layer_idx], visual_token_length-1), 
+                            min(R_dict[self.scale][decoder_layer.self_attn.layer_idx+1][self.retained_num]*dynamic_res, visual_token_length-1), 
                             dim=1).indices
                         retained_visual_tokens[0][retained_visual_index] = 1
 
                         total_visual_tokens = hidden_states[:, self.system_prompt_length:self.system_prompt_length+visual_token_length]
                         sparse_visual_tokens = total_visual_tokens[:, torch.where(retained_visual_tokens == 0)[1]]
                         sparse_attn_weights = cross_attn_weights[:, torch.where(retained_visual_tokens == 0)[1]]
-                        merge_num = int(sparse_attn_weights.shape[1] * 0.3) + 1
+                        merge_num = max(int(sparse_attn_weights.shape[1] * 0.3), 1)
                         merge_token_index = sparse_attn_weights.topk(merge_num).indices
 
                         merge_visual_tokens = sparse_visual_tokens[:, merge_token_index.squeeze(0)]
-                        cluster_num = int(merge_visual_tokens.shape[1] * 0.1) + 1       
-                        if (cluster_num == 0) :
+                        cluster_num = max(int(merge_visual_tokens.shape[1] * 0.1), 1)
+                        if cluster_num == 0:
                             cluster_num = merge_visual_tokens.shape[1]
                         merge_sparse_tokens = cluster_and_merge(merge_visual_tokens, cluster_num)
 

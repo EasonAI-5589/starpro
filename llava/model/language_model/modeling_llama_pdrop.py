@@ -1,5 +1,4 @@
 import torch
-import einops as ein
 from typing import Dict, List, Optional, Tuple, Union
 from transformers.models.llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaModel, Cache, DynamicCache, \
@@ -8,9 +7,16 @@ from transformers.modeling_outputs import BaseModelOutputWithPast
 
 
 R_dict = {
-    192: 0.581,
-    128: 0.437,
-    64: 0.196,
+    "7b": {
+        192: 0.581,
+        128: 0.437,
+        64: 0.196, # 0.198
+    },
+    "13b": {
+        192: 0.586,
+        128: 0.448,
+        64: 0.225,
+    },
 }
 
 
@@ -25,12 +31,24 @@ class PDropLlamaModel(LlamaModel):
     def __init__(self, config: LlamaConfig, pdrop_config: Dict):
         super().__init__(config)
         self.system_prompt_length = 35
-        self.visual_token_length = 576
         self.visual_token_num = 0
+        
+        if config.num_hidden_layers == 32:
+            self.scale = "7b"
+        elif config.num_hidden_layers == 40:
+            self.scale = "13b"
+
+        if config.image_aspect_ratio == "pad":
+            self.visual_token_length = 576
+        elif config.image_aspect_ratio == "anyres":
+            self.visual_token_length = 2880
 
         # PDrop config
-        self.pruning_layer = [1, 7, 15, 23]
-        self.pruning_lambda = R_dict[pdrop_config["T"]]
+        if config.num_hidden_layers == 32:
+            self.pruning_layer = [2, 8, 16, 24]
+        elif config.num_hidden_layers == 40:
+            self.pruning_layer = [2, 10, 20, 30]
+        self.pruning_lambda = R_dict[self.scale][pdrop_config["T"]]
     
     def forward(
         self,
@@ -116,6 +134,7 @@ class PDropLlamaModel(LlamaModel):
         if seq_length > 1:
             visual_token_length = self.visual_token_length
             visual_token_num = 0
+            visual_token_list = []
 
         for decoder_layer in self.layers:
             if output_hidden_states:
@@ -135,8 +154,9 @@ class PDropLlamaModel(LlamaModel):
                 # PDrop
                 if seq_length > 1:
                     visual_token_num += visual_token_length
+                    visual_token_list.append(visual_token_length)
 
-                    if decoder_layer.self_attn.layer_idx in self.pruning_layer:
+                    if (decoder_layer.self_attn.layer_idx + 1) in self.pruning_layer:
                         attn_mask = torch.ones((batch_size, hidden_states.shape[1]), device=hidden_states.device)
                         attn_mask = _prepare_4d_causal_attention_mask(attn_mask, (batch_size, hidden_states.shape[1]), hidden_states, 0)
                         layer_outputs = decoder_layer(

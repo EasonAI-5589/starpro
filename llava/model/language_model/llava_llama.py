@@ -1,17 +1,6 @@
 #    Copyright 2023 Haotian Liu
 #
 #    Licensed under the Apache License, Version 2.0 (the "License");
-#    you may not use this file except in compliance with the License.
-#    You may obtain a copy of the License at
-#
-#        http://www.apache.org/licenses/LICENSE-2.0
-#
-#    Unless required by applicable law or agreed to in writing, software
-#    distributed under the License is distributed on an "AS IS" BASIS,
-#    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#    See the License for the specific language governing permissions and
-#    limitations under the License.
-
 
 from typing import List, Optional, Tuple, Union
 
@@ -27,6 +16,7 @@ from transformers.generation.utils import GenerateOutput
 from .modeling_llama_fastv import FastVLlamaModel
 from .modeling_llama_sparsevlm import SparseLlamaModel
 from .modeling_llama_pdrop import PDropLlamaModel
+from .modelling_llama_star import STARVLMModel  # ⭐ 从 modelling_llama_star 导入
 from ..llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
 
 
@@ -42,7 +32,6 @@ class LlavaLlamaModel(LlavaMetaModel, LlamaModel):
 
 
 class FastVLlavaLlamaModel(LlavaMetaModel, FastVLlamaModel):
-    # Alter LlavaLlamaModel to FastVLlavaLlamaModel
     config_class = LlavaLlamaConfig
 
     def __init__(self, config: LlamaConfig, fastv_config: dict):
@@ -50,17 +39,28 @@ class FastVLlavaLlamaModel(LlavaMetaModel, FastVLlamaModel):
 
 
 class SparseLlavaLlamaModel(LlavaMetaModel, SparseLlamaModel):
-    # Alter LlavaLlamaModel to SparseLlavaLlamaModel
     config_class = LlavaLlamaConfig
+    
     def __init__(self, config: LlamaConfig, sparsevlm_config: dict):
         super(SparseLlavaLlamaModel, self).__init__(config, sparsevlm_config=sparsevlm_config)
 
 
 class PDropLlavaLlamaModel(LlavaMetaModel, PDropLlamaModel):
-    # Alter LlavaLlamaModel to PDropLlavaLlamaModel
     config_class = LlavaLlamaConfig
+    
     def __init__(self, config: LlamaConfig, pdrop_config: dict):
         super(PDropLlavaLlamaModel, self).__init__(config, pdrop_config=pdrop_config)
+
+
+# ⭐ STAR: Semantic-aware Token Allocation with Regional Visual Latent Model
+class STARLlavaLlamaModel(LlavaMetaModel, STARVLMModel):
+    """
+    STAR integrated with LLaVA
+    """
+    config_class = LlavaLlamaConfig
+    
+    def __init__(self, config: LlamaConfig, star_config: dict):
+        super(STARLlavaLlamaModel, self).__init__(config, starvlm_config=star_config)
 
 
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
@@ -69,9 +69,16 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     def __init__(self, config, pruning_method=None, visual_token_num=None, 
                  use_fastv=False, fastv_config=None,
                  use_sparsevlm=False, sparsevlm_config=None,
-                 use_pdrop=False, pdrop_config=None, **kwargs):
+                 use_pdrop=False, pdrop_config=None,
+                 use_star=False, star_config=None,  # ⭐ 参数名: use_star, star_config
+                 **kwargs):
         super(LlamaForCausalLM, self).__init__(config)
-        if use_fastv:
+        
+        # ⭐ Model selection with STAR support
+        if use_star:
+            print(f"🌟 Use STAR: {star_config}")
+            self.model = STARLlavaLlamaModel(config, star_config=star_config)
+        elif use_fastv:
             print(f"Use FastV: {fastv_config}")
             self.model = FastVLlavaLlamaModel(config, fastv_config)
         elif use_sparsevlm:
@@ -91,14 +98,20 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         self.pruning_method = pruning_method
         self.visual_token_num = visual_token_num
 
+        # Latency
+        self.start_latency = False
+        self.phase = "prefill"
+        self.start_event = torch.cuda.Event(enable_timing=True)
+        self.end_event = torch.cuda.Event(enable_timing=True)
+        self.prefill_latency = 0.0
+        self.decode_latency = 0.0
+
         # Initialize weights and apply final processing
         self.post_init()
     
-    # Visual Token Pruning
     def get_pruning_method(self):
         return self.pruning_method
 
-    # Visual Token Pruning
     def get_visual_token_num(self):
         return self.visual_token_num
 
@@ -138,8 +151,14 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 images,
                 image_sizes
             )
+        
+        if self.start_latency:
+            if self.phase == "prefill" and input_ids is None:
+                self.start_event.record()
+            elif self.phase == "decode" and input_ids.shape[1] == 1:
+                self.start_event.record()
 
-        return super().forward(
+        output = super().forward(
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
@@ -151,6 +170,20 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict
         )
+
+        if self.start_latency:
+            if self.phase == "prefill" and input_ids is None:
+                self.end_event.record()
+                torch.cuda.synchronize()
+                self.prefill_latency += self.start_event.elapsed_time(self.end_event)
+                self.phase = "decode"
+            elif self.phase == "decode" and input_ids.shape[1] == 1:
+                self.end_event.record()
+                torch.cuda.synchronize()
+                self.decode_latency += self.start_event.elapsed_time(self.end_event)
+                self.phase = "prefill"
+
+        return output
 
     @torch.no_grad()
     def generate(
@@ -205,12 +238,13 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             input_ids, past_key_values=past_key_values, inputs_embeds=inputs_embeds, **kwargs
         )
         if images is not None:
-            inputs['images'] = images
+            inputs["images"] = images
         if image_sizes is not None:
-            inputs['image_sizes'] = image_sizes
+            inputs["image_sizes"] = image_sizes
         if texts is not None:
-            inputs['texts'] = texts
+            inputs["texts"] = texts
         return inputs
+
 
 AutoConfig.register("llava_llama", LlavaLlamaConfig)
 AutoModelForCausalLM.register(LlavaLlamaConfig, LlavaLlamaForCausalLM)

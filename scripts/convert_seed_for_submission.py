@@ -56,6 +56,7 @@ if __name__ == "__main__":
     args = get_args()
     data = json.load(open(args.annotation_file))
     ques_type_id_to_name = {id:n for n,id in data['question_type'].items()}
+    os.makedirs(os.path.dirname(args.result_upload_file), exist_ok=True)
 
     results = eval_single(args.result_file)
     eval_single(args.result_file, eval_only_type='image')

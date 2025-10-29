@@ -27,23 +27,18 @@ def get_chunk(lst, n, k):
 
 
 def eval_model(args):
-    # Seed
-    torch.manual_seed(args.seed)
-    torch.cuda.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
-
     # Model
     disable_torch_init()
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(model_path)
 
     use_fastv = True if args.pruning_method == "fastv" else False
-    fastv_config = {"K": 1, "T": args.visual_token_num}
+    fastv_config = {"K": 2, "T": args.visual_token_num}
     use_sparsevlm = True if args.pruning_method == "sparsevlm" else False
     sparsevlm_config = {"T": args.visual_token_num}
     use_pdrop = True if args.pruning_method == "pdrop" else False
     pdrop_config = {"T": args.visual_token_num}
-    use_text_tower = True if args.pruning_method == "trim" else False
+    use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method else False
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
@@ -126,7 +121,6 @@ if __name__ == "__main__":
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--top_p", type=float, default=None)
     parser.add_argument("--num_beams", type=int, default=1)
-    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--pruning_method", type=str, default=None)
     parser.add_argument("--visual_token_num", type=int, default=576)
     args = parser.parse_args()

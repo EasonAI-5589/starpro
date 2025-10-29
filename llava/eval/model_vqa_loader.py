@@ -77,23 +77,32 @@ def create_data_loader(questions, image_folder, tokenizer, image_processor, mode
 
 
 def eval_model(args):
-    # Seed
-    torch.manual_seed(args.seed)
-    torch.cuda.manual_seed(args.seed)
-    torch.cuda.manual_seed_all(args.seed)
-
     # Model
     disable_torch_init()
     model_path = os.path.expanduser(args.model_path)
     model_name = get_model_name_from_path(model_path)
 
+    # ========== Method Configuration ==========
     use_fastv = True if args.pruning_method == "fastv" else False
-    fastv_config = {"K": 1, "T": args.visual_token_num}
+    fastv_config = {"K": 2, "T": args.visual_token_num}
+    
     use_sparsevlm = True if args.pruning_method == "sparsevlm" else False
     sparsevlm_config = {"T": args.visual_token_num}
+    
     use_pdrop = True if args.pruning_method == "pdrop" else False
     pdrop_config = {"T": args.visual_token_num}
-    use_text_tower = True if args.pruning_method == "trim" else False
+    
+    # ⭐ STAR Configuration
+    use_star = True if args.pruning_method == "star" else False
+    star_config = {
+        "T": args.visual_token_num,  # Target visual tokens (64/128/192)
+        "num_latent": args.num_latent,  # Number of latent tokens (default: 20)
+        "latent_pool_size": (args.latent_pool_h, args.latent_pool_w),  # Grid size (default: 5x4)
+        "debug":True,
+    }
+    
+    use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method else False
+    
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
@@ -101,6 +110,7 @@ def eval_model(args):
         use_fastv=use_fastv, fastv_config=fastv_config,
         use_sparsevlm=use_sparsevlm, sparsevlm_config=sparsevlm_config,
         use_pdrop=use_pdrop, pdrop_config=pdrop_config,
+        use_star=use_star, star_config=star_config,  # ⭐ STAR
         use_text_tower=use_text_tower,
     )
 
@@ -118,6 +128,7 @@ def eval_model(args):
     data_loader = create_data_loader(questions, args.image_folder, tokenizer, image_processor, model.config)
 
     data_bar = tqdm(zip(data_loader, questions), total=len(questions))
+    data_num = 0
     for (input_ids, image_tensors, image_sizes), line in data_bar:
         idx = line["question_id"]
         cur_prompt = line["text"]
@@ -130,6 +141,11 @@ def eval_model(args):
         image_tensors = image_tensors.to(dtype=torch.float16, device='cuda', non_blocking=True)
 
         with torch.inference_mode():
+            if data_num == 50:
+                model.start_latency = True
+            # elif data_num == 1050:
+            #     model.start_latency = False
+            #     break
             output_ids, visual_token_num = model.generate(
                 input_ids,
                 images=image_tensors,
@@ -143,7 +159,9 @@ def eval_model(args):
                 use_cache=True)
             if hasattr(model.model, 'visual_token_num'):
                 visual_token_num = model.model.visual_token_num
-            data_bar.set_postfix(vtn=f"{visual_token_num}")
+            gpu_memory_usage = torch.cuda.memory_allocated() / 1024**3
+            data_bar.set_postfix(vtn=f"{visual_token_num}", gpu=f"{gpu_memory_usage:.2f} GB")
+            data_num += 1
 
         outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
 
@@ -156,6 +174,12 @@ def eval_model(args):
                                    "metadata": {}}) + "\n")
         ans_file.flush()
     ans_file.close()
+
+    # Latency
+    print(f"Prefill latency: {model.prefill_latency / 1000:.2f} ms")
+    print(f"Decode latency: {model.decode_latency / 1000:.2f} ms")
+    print(f"GPU memory usage: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -171,9 +195,17 @@ if __name__ == "__main__":
     parser.add_argument("--top_p", type=float, default=None)
     parser.add_argument("--num_beams", type=int, default=1)
     parser.add_argument("--max_new_tokens", type=int, default=128)
-    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--pruning_method", type=str, default=None)
     parser.add_argument("--visual_token_num", type=int, default=576)
+    
+    # ⭐ STAR specific arguments
+    parser.add_argument("--num_latent", type=int, default=20, 
+                        help="Number of latent tokens for STAR (default: 20)")
+    parser.add_argument("--latent_pool_h", type=int, default=5,
+                        help="Height of latent pooling grid for STAR (default: 5)")
+    parser.add_argument("--latent_pool_w", type=int, default=4,
+                        help="Width of latent pooling grid for STAR (default: 4)")
+    
     args = parser.parse_args()
 
     eval_model(args)

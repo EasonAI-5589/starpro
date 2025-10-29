@@ -28,23 +28,43 @@ class CLIPVisionTower(nn.Module):
         else:
             self.cfg_only = CLIPVisionConfig.from_pretrained(self.vision_tower_name)
 
-    def load_model(self, device_map=None, text_tower=False):
+    def load_model(self, device_map=None):
         if self.is_loaded:
             print('{} is already loaded, `load_model` called again, skipping.'.format(self.vision_tower_name))
             return
 
         self.image_processor = CLIPImageProcessor.from_pretrained(self.vision_tower_name)
-        self.vision_tower = CLIPVisionModelWithProjection.from_pretrained(self.vision_tower_name, device_map=device_map)
+        self.vision_tower = CLIPVisionModel.from_pretrained(self.vision_tower_name, device_map=device_map)
         self.vision_tower.requires_grad_(False)
 
-        if text_tower:
-            self.text_tokenizer = CLIPTokenizerFast.from_pretrained(self.vision_tower_name)
-            self.text_tower = CLIPTextModelWithProjection.from_pretrained(self.vision_tower_name, device_map=device_map)
-            self.text_tower.requires_grad_(False)
-
-            self.max_position_embeddings = self.text_tower.config.max_position_embeddings
-
         self.is_loaded = True
+
+    def load_text_tower(self, device_map=None):
+        # 方案1: 不传递 device_map，之后手动移动到设备
+        vision_tower_with_projection = CLIPVisionModelWithProjection.from_pretrained(
+            self.vision_tower_name
+        )
+        
+        # 如果需要移动到特定设备
+        if device_map is not None and isinstance(device_map, str):
+            device = torch.device(device_map if device_map != 'auto' else 'cuda')
+            vision_tower_with_projection = vision_tower_with_projection.to(device)
+        
+        self.vision_tower.visual_projection = vision_tower_with_projection.visual_projection
+
+        self.text_tokenizer = CLIPTokenizerFast.from_pretrained(self.vision_tower_name)
+        
+        # 同样处理 text tower
+        self.text_tower = CLIPTextModelWithProjection.from_pretrained(
+            self.vision_tower_name
+        )
+        if device_map is not None and isinstance(device_map, str):
+            device = torch.device(device_map if device_map != 'auto' else 'cuda')
+            self.text_tower = self.text_tower.to(device)
+        
+        self.text_tower.requires_grad_(False)
+
+        self.max_position_embeddings = self.text_tower.config.max_position_embeddings
 
     def feature_select(self, image_forward_outs, output_attentions=False):
         image_features = image_forward_outs.hidden_states[self.select_layer]
@@ -87,7 +107,7 @@ class CLIPVisionTower(nn.Module):
                     image_features = (
                         image_outputs[0].to(images.dtype),
                         image_outputs[1].to(images.dtype),
-                        self.vision_tower.vision_model.encoder.layers[self.select_layer].self_attn.k_proj.k_output.to(images.dtype),
+                        self.vision_tower.vision_model.encoder.layers[self.select_layer].self_attn.k_proj.k_output[:, 1:].to(images.dtype),
                         image_forward_outs.hidden_states[self.select_layer][:, :1].to(images.dtype),
                     )
                     hook_handle_k.remove()
@@ -110,7 +130,7 @@ class CLIPVisionTower(nn.Module):
 
             if texts is not None:
                 image_embeds = self.vision_tower.vision_model.post_layernorm(image_outputs)
-                image_embeds = self.vision_tower.visual_projection(image_embeds)
+                image_embeds = self.vision_tower.visual_projection(image_embeds.float())
                 image_features = (image_features, image_embeds, text_embeds)
 
         return image_features

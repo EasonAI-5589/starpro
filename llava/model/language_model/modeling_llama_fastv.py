@@ -7,18 +7,30 @@ from transformers.modeling_outputs import BaseModelOutputWithPast
 
 
 R_dict = {
-    192: {
-        1: 166,
-        2: 152,
+    "7b": {
+        2: {
+            192: 166,
+            128: 98,
+            64: 29, # 30
+        },
+        3: {
+            192: 152,
+            128: 81,
+            64: 11,
+        },
     },
-    128: {
-        1: 98,
-        2: 81,
-    },
-    64: {
-        1: 29,
-        2: 11,
-    },
+    "13b": {
+        2: {
+            192: 171,
+            128: 104,
+            64: 37,
+        },
+        3: {
+            192: 160,
+            128: 91,
+            64: 22,
+        }
+    }
 }
 
 
@@ -33,12 +45,25 @@ class FastVLlamaModel(LlamaModel):
     def __init__(self, config: LlamaConfig, fastv_config: Dict):
         super().__init__(config)
         self.system_prompt_length = 35
-        self.visual_token_length = 576
         self.visual_token_num = 0
+        
+        if config.num_hidden_layers == 32:
+            self.scale = "7b"
+        elif config.num_hidden_layers == 40:
+            self.scale = "13b"
+
+        if config.image_aspect_ratio == "pad":
+            self.visual_token_length = 576
+            self.anyres = False
+        elif config.image_aspect_ratio == "anyres":
+            self.visual_token_length = 2880
+            self.anyres = True
 
         # FastV config
         self.K = fastv_config["K"]
-        self.R = R_dict[fastv_config["T"]][fastv_config["K"]]
+        self.R = R_dict[self.scale][self.K][fastv_config["T"]]
+        if self.anyres:
+            self.R *= 5
     
     def forward(
         self,
@@ -123,6 +148,7 @@ class FastVLlamaModel(LlamaModel):
         if seq_length > 1:
             visual_token_length = self.visual_token_length
             visual_token_num = 0
+            visual_token_list = []
 
         for decoder_layer in self.layers:
             if output_hidden_states:
@@ -142,7 +168,9 @@ class FastVLlamaModel(LlamaModel):
                 # FastV
                 if seq_length > 1:
                     visual_token_num += visual_token_length
-                    if decoder_layer.self_attn.layer_idx == self.K:
+                    visual_token_list.append(visual_token_length)
+
+                    if (decoder_layer.self_attn.layer_idx + 1) == self.K:
                         attn_mask = torch.ones((batch_size, hidden_states.shape[1]), device=hidden_states.device)
                         attn_mask = _prepare_4d_causal_attention_mask(attn_mask, (batch_size, hidden_states.shape[1]), hidden_states, 0)
                         layer_outputs = decoder_layer(
