@@ -1254,38 +1254,28 @@ class LlavaMetaForCausalLM(ABC):
             image_normalized = image_features / image_features.norm(dim=-1, keepdim=True)
             similarity_matrix = torch.matmul(image_normalized, image_normalized.transpose(1, 2))  # (B, N, N)
 
-            print(f"\n[Stage 1 Selection: Importance + Diversity]")
-            print(f"  Method: Greedy selection with CLS attention + similarity repulsion")
+            print(f"\n[Stage 1 Selection: De-redundancy via Self-Similarity]")
+            print(f"  Method: Remove redundant tokens with high self-similarity")
 
-            # Greedy selection: balance importance and diversity
-            selected_indices = []
+            # De-redundancy: remove tokens with high similarity to others
+            # For each token, find its max similarity to all other tokens
+            # Tokens with high max_sim are redundant (can be represented by others)
+
+            # Set diagonal to 0 to exclude self-similarity
+            similarity_matrix_masked = similarity_matrix.clone()
             for b in range(B):
-                selected = []
-                remaining = set(range(N))
+                similarity_matrix_masked[b].fill_diagonal_(0)
 
-                for step in range(stage1_keep_num):
-                    if step == 0:
-                        # First: select the most important token
-                        idx = cls_attn[b].argmax().item()
-                    else:
-                        # Compute repulsion score: importance - max_similarity_to_selected
-                        scores = torch.zeros(N, device=device)
-                        for idx in remaining:
-                            # Importance from CLS attention
-                            importance = cls_attn[b, idx]
-                            # Repulsion: max similarity to already selected tokens
-                            max_sim = similarity_matrix[b, idx, selected].max() if selected else 0
-                            # Combined score: importance - repulsion (favor diverse tokens)
-                            scores[idx] = importance - 0.5 * max_sim  # 0.5 is diversity weight
+            # Find max similarity to any other token
+            max_similarity, _ = similarity_matrix_masked.max(dim=2)  # (B, N)
 
-                        idx = scores.argmax().item()
+            # Remove the most redundant N//2 tokens (highest max_similarity)
+            # Keep the less redundant N//2 tokens (lowest max_similarity)
+            redundancy_scores = max_similarity
 
-                    selected.append(idx)
-                    remaining.remove(idx)
-
-                selected_indices.append(sorted(selected))  # Keep spatial order
-
-            stage1_indices = torch.tensor(selected_indices, dtype=torch.long, device=device)
+            # Select tokens with LOWEST redundancy (keep diverse tokens)
+            stage1_indices = redundancy_scores.topk(k=stage1_keep_num, dim=1, largest=False).indices
+            stage1_indices = stage1_indices.sort(dim=1).values  # Keep spatial order
 
             print(f"  CLS attention stats: mean={cls_attn.mean():.4f}, std={cls_attn.std():.4f}")
             print(f"  Selected indices shape: {stage1_indices.shape}")
