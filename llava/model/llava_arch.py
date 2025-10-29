@@ -1273,10 +1273,16 @@ class LlavaMetaForCausalLM(ABC):
             index_masks = torch.ones(B, stage1_keep_num, dtype=torch.bool, device=device)
             merged_features = None
 
-            print(f"\n[Stage 1 Output]")
+            print(f"\n[Stage 1 Output (before projection)]")
             print(f"  Output shape: {image_features.shape}")
             print(f"  Ready for Stage 2 text-guided progressive pruning")
             print(f"{'='*80}\n")
+
+        # Apply mm_projector to project visual features to LLM space
+        image_features = self.get_model().mm_projector(image_features)
+
+        if merged_features is not None:
+            merged_features = self.get_model().mm_projector(merged_features)
 
         return image_features, index_masks, merged_features
 
