@@ -249,18 +249,58 @@ class STARVLMModel(LlamaModel):
                     hidden_states = layer_outputs[0]
                     layer_attention = layer_outputs[1]  # (B, num_heads, seq_len, seq_len)
 
-                    # Text-guided importance scoring
-                    # Use the last text token's attention to visual tokens
-                    # Average across heads: (B, seq_len, seq_len)
                     device = hidden_states.device
-                    attn_avg = layer_attention.mean(dim=1)  # (B, seq_len, seq_len)
 
-                    # Get last token's attention to visual region
-                    # last_token_idx = -1 means the newest text token
-                    visual_attention = attn_avg[0, -1, visual_start:visual_end]  # (N_vis,)
+                    # STAR-V2: Multi-text-token guidance (inspired by SparseVLM)
+                    # Unlike PDrop which only uses last token, we identify important text tokens
+                    if self.mode == "star_v2":
+                        # Extract visual and text hidden states
+                        visual_hidden = hidden_states[:, visual_start:visual_end]  # (B, N_vis, D)
+                        text_hidden = hidden_states[:, visual_end:]  # (B, N_text, D)
 
-                    print(f"[{mode_name}] Visual attention stats: mean={visual_attention.mean():.4f}, "
-                          f"std={visual_attention.std():.4f}, max={visual_attention.max():.4f}")
+                        # Compute text-visual similarity matrix to find important text tokens
+                        # (B, N_text, D) @ (B, D, N_vis) -> (B, N_text, N_vis)
+                        text_visual_sim = torch.matmul(text_hidden, visual_hidden.transpose(1, 2))
+                        text_visual_sim = text_visual_sim.squeeze(0)  # (N_text, N_vis)
+
+                        # Identify text tokens that attend strongly to visual tokens
+                        # Average similarity per text token
+                        text_importance = text_visual_sim.softmax(dim=0).mean(dim=1)  # (N_text,)
+
+                        # Select text raters: tokens with above-average importance
+                        text_rater_mask = text_importance > text_importance.mean()
+                        text_rater_indices = torch.where(text_rater_mask)[0]
+
+                        if len(text_rater_indices) == 0:
+                            # Fallback: use top 50% if no tokens above mean
+                            num_raters = max(1, len(text_importance) // 2)
+                            text_rater_indices = text_importance.topk(num_raters).indices
+
+                        print(f"[{mode_name}] Using {len(text_rater_indices)} text rater tokens (out of {len(text_importance)} text tokens)")
+
+                        # Aggregate attention from text raters to visual tokens
+                        # Average across heads: (B, seq_len, seq_len)
+                        attn_avg = layer_attention.mean(dim=1)  # (B, seq_len, seq_len)
+
+                        # Get attention from text raters to visual region
+                        # Offset text_rater_indices to account for visual tokens
+                        text_rater_positions = text_rater_indices + visual_end
+                        rater_to_visual_attn = attn_avg[0, text_rater_positions, visual_start:visual_end]  # (N_raters, N_vis)
+
+                        # Aggregate: mean across text raters
+                        visual_attention = rater_to_visual_attn.mean(dim=0)  # (N_vis,)
+
+                        print(f"[{mode_name}] Multi-token text guidance - Visual attention stats: "
+                              f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
+                              f"max={visual_attention.max():.4f}")
+                    else:
+                        # STAR (original): Use last token attention (PDrop-style)
+                        attn_avg = layer_attention.mean(dim=1)  # (B, seq_len, seq_len)
+                        visual_attention = attn_avg[0, -1, visual_start:visual_end]  # (N_vis,)
+
+                        print(f"[{mode_name}] Single-token text guidance - Visual attention stats: "
+                              f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
+                              f"max={visual_attention.max():.4f}")
 
                     # Select top-k important visual tokens (text-guided)
                     keep_indices = torch.topk(visual_attention, k=target_visual_length).indices
