@@ -1309,6 +1309,92 @@ class LlavaMetaForCausalLM(ABC):
             print(f"  Ready for Stage 2 text-guided progressive pruning")
             print(f"{'='*80}\n")
 
+        elif self.pruning_method == 'star_v2_anchor':
+            # Two-Stage Pruning Framework with Anchor-based De-redundancy
+            # Stage 1: Select anchors (CLS attention) + remove similar neighbors
+            # Stage 2: Text-guided progressive pruning
+
+            print(f"\n{'='*80}")
+            print(f"STAR-V2-Anchor Stage 1: Anchor-based De-redundancy")
+            print(f"{'='*80}")
+
+            # Get visual self-attention
+            image_features_attn, image_attentions, image_keys, image_cls = self.get_model().get_vision_tower()(images, output_attentions=True)
+            image_features = image_features_attn
+
+            B, N, C = image_features.shape
+            device = image_features.device
+
+            stage1_keep_num = N // 2  # 576 -> 288
+
+            print(f"[Stage 1 Config]")
+            print(f"  Original tokens: {N}")
+            print(f"  Stage 1 keeps: {stage1_keep_num} (50%)")
+            print(f"  Target tokens: {self.visual_token_num}")
+
+            # CLS attention as importance score
+            cls_attn = image_attentions.mean(dim=1)  # (B, N)
+
+            # Compute similarity matrix
+            image_normalized = image_features / image_features.norm(dim=-1, keepdim=True)
+            similarity_matrix = torch.matmul(image_normalized, image_normalized.transpose(1, 2))  # (B, N, N)
+
+            print(f"\n[Step 1: Select Anchor Tokens]")
+            # Step 1: Select anchor tokens using CLS attention
+            num_anchors = stage1_keep_num // 2  # 144 anchors
+            anchor_indices = cls_attn.topk(k=num_anchors, dim=1).indices  # (B, num_anchors)
+            print(f"  Anchors: {num_anchors} tokens (top CLS attention)")
+
+            print(f"\n[Step 2: De-redundancy Around Anchors]")
+            # Step 2: For non-anchor tokens, keep those with LOW similarity to anchors
+            all_indices = set(range(N))
+            selected_indices = []
+
+            for b in range(B):
+                anchors = anchor_indices[b].tolist()
+                selected = set(anchors)  # Start with anchors
+                non_anchors = list(all_indices - selected)
+
+                if len(non_anchors) > 0:
+                    non_anchor_tensor = torch.tensor(non_anchors, device=device)
+                    anchor_tensor = anchor_indices[b]
+
+                    # Similarity from non-anchors to anchors (anchor queries neighbors)
+                    similarities = similarity_matrix[b, non_anchor_tensor[:, None], anchor_tensor]
+
+                    # Max similarity to any anchor
+                    max_sim_to_anchors, _ = similarities.max(dim=1)
+
+                    # Keep non-anchors with LOW similarity (diverse, not redundant)
+                    num_to_keep = stage1_keep_num - num_anchors
+                    if num_to_keep > 0:
+                        keep_mask = max_sim_to_anchors.topk(k=min(num_to_keep, len(non_anchors)),
+                                                            dim=0, largest=False).indices
+                        kept_non_anchors = non_anchor_tensor[keep_mask].tolist()
+                        selected.update(kept_non_anchors)
+
+                selected_indices.append(sorted(list(selected)))
+
+            stage1_indices = torch.tensor(selected_indices, dtype=torch.long, device=device)
+            print(f"  Non-anchors kept: {stage1_keep_num - num_anchors} (low similarity to anchors)")
+            print(f"  Interpretation: Anchors query neighbors, remove redundant")
+
+            # Gather selected features
+            stage1_features = torch.gather(
+                image_features,
+                dim=1,
+                index=stage1_indices.unsqueeze(-1).expand(-1, -1, C)
+            )
+
+            image_features = stage1_features
+            index_masks = torch.ones(B, stage1_keep_num, dtype=torch.bool, device=device)
+            merged_features = None
+
+            print(f"\n[Stage 1 Output (before projection)]")
+            print(f"  Output shape: {image_features.shape}")
+            print(f"  Ready for Stage 2 text-guided progressive pruning")
+            print(f"{'='*80}\n")
+
         # Apply mm_projector to project visual features to LLM space
         image_features = self.get_model().mm_projector(image_features)
 

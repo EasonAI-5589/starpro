@@ -30,7 +30,7 @@ STAR_V2_SCHEDULE = {
         # 32 layers: (288*2 + X*6 + Y*8 + Z*8 + T*8) / 32 = target
         192: [(2, 240), (8, 216), (16, 192), (24, 192)],     # Avg ≈ 192
         128: [(2, 180), (8, 144), (16, 128), (24, 128)],     # Avg ≈ 128
-        64: [(2, 80), (8, 56), (16, 40), (24, 32)],          # Avg ≈ 64
+        64: [(2, 288), (8, 144), (16, 0), (24, 0)],         # Avg ≈ 64
         32: [(2, 64), (8, 40), (16, 24), (24, 16)],          # Avg ≈ 32
     },
     "13b": {
@@ -210,6 +210,10 @@ class STARVLMModel(LlamaModel):
 
             layer_idx = decoder_layer.self_attn.layer_idx + 1
 
+            # Track visual token count for each layer (following PDrop/SparseVLM approach)
+            if seq_length > 1 and self.prefill_done:
+                visual_token_sum += self.current_visual_length
+
             # Apply text-guided pruning at scheduled layers
             if seq_length > 1 and self.prefill_done and layer_idx in self.pruning_layers:
                 target_visual_length = self.pruning_layers[layer_idx]
@@ -300,7 +304,6 @@ class STARVLMModel(LlamaModel):
                         ], dim=2)
 
                     self.current_visual_length = target_visual_length
-                    visual_token_sum += target_visual_length
 
                     if use_cache:
                         next_decoder_cache = layer_outputs[2 if output_attentions else 1]
@@ -339,7 +342,8 @@ class STARVLMModel(LlamaModel):
         hidden_states = self.norm(hidden_states)
 
         if seq_length > 1:
-            self.visual_token_num = visual_token_sum / len(self.pruning_layers) if self.pruning_layers else 0
+            # Calculate average visual tokens across all layers (following PDrop/SparseVLM)
+            self.visual_token_num = visual_token_sum / len(self.layers) if self.layers else 0
 
         # Add hidden states from the last decoder layer
         if output_hidden_states:
