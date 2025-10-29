@@ -251,44 +251,32 @@ class STARVLMModel(LlamaModel):
 
                     device = hidden_states.device
 
-                    # STAR-V2: Multi-text-token guidance (inspired by SparseVLM)
+                    # Average across heads: (B, seq_len, seq_len)
+                    attn_avg = layer_attention.mean(dim=1)
+
+                    # STAR-V2: Multi-text-token guidance (inspired by STARVLM)
                     # Unlike PDrop which only uses last token, we identify important text tokens
                     if self.mode == "star_v2":
-                        # Extract visual and text hidden states
-                        visual_hidden = hidden_states[:, visual_start:visual_end]  # (B, N_vis, D)
-                        text_hidden = hidden_states[:, visual_end:]  # (B, N_text, D)
+                        # Extract text-to-visual cross-attention (STARVLM-style)
+                        # All text tokens (after visual) to all visual tokens
+                        cross_attention = attn_avg[:, visual_end:, visual_start:visual_end]  # (B, N_text, N_vis)
 
-                        # Compute text-visual similarity matrix to find important text tokens
-                        # (B, N_text, D) @ (B, D, N_vis) -> (B, N_text, N_vis)
-                        text_visual_sim = torch.matmul(text_hidden, visual_hidden.transpose(1, 2))
-                        text_visual_sim = text_visual_sim.squeeze(0)  # (N_text, N_vis)
+                        # Compute each text token's total attention to visual region
+                        # High sum = this text token attends strongly to visual content
+                        text_visual_sum = cross_attention.sum(dim=2)  # (B, N_text)
+                        text_scores = text_visual_sum / (text_visual_sum.sum(dim=1, keepdim=True) + 1e-8)  # Normalize
 
-                        # Identify text tokens that attend strongly to visual tokens
-                        # Average similarity per text token
-                        text_importance = text_visual_sim.softmax(dim=0).mean(dim=1)  # (N_text,)
+                        # Select text raters: top-50% tokens that attend most to visual
+                        n_text = text_scores.shape[1]
+                        k = max(int(n_text * 0.5), min(5, n_text))  # At least 50% or 5 tokens
 
-                        # Select text raters: tokens with above-average importance
-                        text_rater_mask = text_importance > text_importance.mean()
-                        text_rater_indices = torch.where(text_rater_mask)[0]
+                        _, text_rater_indices = text_scores[0].topk(k)
 
-                        if len(text_rater_indices) == 0:
-                            # Fallback: use top 50% if no tokens above mean
-                            num_raters = max(1, len(text_importance) // 2)
-                            text_rater_indices = text_importance.topk(num_raters).indices
-
-                        print(f"[{mode_name}] Using {len(text_rater_indices)} text rater tokens (out of {len(text_importance)} text tokens)")
+                        print(f"[{mode_name}] Using {len(text_rater_indices)} text rater tokens (out of {n_text} text tokens, {len(text_rater_indices)/n_text*100:.1f}%)")
 
                         # Aggregate attention from text raters to visual tokens
-                        # Average across heads: (B, seq_len, seq_len)
-                        attn_avg = layer_attention.mean(dim=1)  # (B, seq_len, seq_len)
-
-                        # Get attention from text raters to visual region
-                        # Offset text_rater_indices to account for visual tokens
-                        text_rater_positions = text_rater_indices + visual_end
-                        rater_to_visual_attn = attn_avg[0, text_rater_positions, visual_start:visual_end]  # (N_raters, N_vis)
-
-                        # Aggregate: mean across text raters
-                        visual_attention = rater_to_visual_attn.mean(dim=0)  # (N_vis,)
+                        cross_attention_filtered = cross_attention[:, text_rater_indices, :]  # (B, k, N_vis)
+                        visual_attention = cross_attention_filtered.mean(dim=1).squeeze(0)  # (N_vis,)
 
                         print(f"[{mode_name}] Multi-token text guidance - Visual attention stats: "
                               f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
