@@ -93,11 +93,12 @@ def eval_model(args):
     pdrop_config = {"T": args.visual_token_num}
     
     # ⭐ STAR Configuration
-    use_star = True if args.pruning_method == "star" else False
+    use_star = True if args.pruning_method in ["star", "star_v2"] else False
     star_config = {
         "T": args.visual_token_num,  # Target visual tokens (64/128/192)
         "num_latent": args.num_latent,  # Number of latent tokens (default: 20)
         "latent_pool_size": (args.latent_pool_h, args.latent_pool_w),  # Grid size (default: 5x4)
+        "mode": "star_v2" if args.pruning_method == "star_v2" else "star",  # Two-stage or single-stage
         "debug":True,
     }
     

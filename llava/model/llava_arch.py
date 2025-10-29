@@ -1222,6 +1222,62 @@ class LlavaMetaForCausalLM(ABC):
             if enable_debug:
                 print(f"\n{'='*80}\n")
 
+        elif self.pruning_method == 'star_v2':
+            # Two-Stage Pruning Framework
+            # Stage 1 (here in llava_arch): Visual self-attention pruning - keep 50% tokens
+            # Stage 2 (in modeling_llama_star): Text-guided progressive pruning
+
+            print(f"\n{'='*80}")
+            print(f"STAR-V2 Stage 1: Visual Self-Attention Pruning")
+            print(f"{'='*80}")
+
+            # Get visual self-attention
+            image_features_attn, image_attentions, image_keys, image_cls = self.get_model().get_vision_tower()(images, output_attentions=True)
+            image_features = image_features_attn
+
+            B, N, C = image_features.shape
+            device = image_features.device
+
+            # Stage 1: Keep 50% of original tokens using self-attention
+            stage1_keep_num = N // 2  # 576 -> 288, or 2880 -> 1440
+
+            print(f"[Stage 1 Config]")
+            print(f"  Original tokens: {N}")
+            print(f"  Stage 1 keeps: {stage1_keep_num} (50%)")
+            print(f"  Target tokens: {self.visual_token_num}")
+            print(f"  Stage 2 will prune: {stage1_keep_num} -> {self.visual_token_num}")
+
+            # Use CLS attention (average across heads) as importance score
+            cls_attn = image_attentions.mean(dim=1)  # (B, N)
+
+            # Select top-k tokens based on self-attention
+            stage1_indices = cls_attn.topk(k=stage1_keep_num, dim=1).indices  # (B, stage1_keep_num)
+            stage1_indices_sorted = stage1_indices.sort(dim=1).values  # Keep spatial order
+
+            print(f"\n[Stage 1 Selection]")
+            print(f"  Selection method: Visual self-attention (CLS token)")
+            print(f"  Attention stats: mean={cls_attn.mean():.4f}, std={cls_attn.std():.4f}")
+            print(f"  Selected indices shape: {stage1_indices_sorted.shape}")
+
+            # Gather selected features
+            stage1_features = torch.gather(
+                image_features,
+                dim=1,
+                index=stage1_indices_sorted.unsqueeze(-1).expand(-1, -1, C)
+            )
+
+            # Update image_features for Stage 2
+            image_features = stage1_features
+
+            # Create index masks (all True for now, Stage 2 will further prune)
+            index_masks = torch.ones(B, stage1_keep_num, dtype=torch.bool, device=device)
+            merged_features = None
+
+            print(f"\n[Stage 1 Output]")
+            print(f"  Output shape: {image_features.shape}")
+            print(f"  Ready for Stage 2 text-guided progressive pruning")
+            print(f"{'='*80}\n")
+
         return image_features, index_masks, merged_features
 
     def prepare_inputs_labels_for_multimodal(

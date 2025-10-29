@@ -6,7 +6,7 @@ from transformers.models.llama.modeling_llama import LlamaModel, Cache, DynamicC
 from transformers.modeling_outputs import BaseModelOutputWithPast
 
 
-# STAR-FastV多层剪枝schedule (与STAR相同)
+# STAR-FastV Multi-layer pruning schedule
 STAR_FASTV_SCHEDULE = {
     "7b": {
         192: [(2, 300), (8, 200), (16, 150), (24, 192)],
@@ -20,19 +20,36 @@ STAR_FASTV_SCHEDULE = {
     }
 }
 
+# STAR-V2 Two-Stage Pruning Schedule
+# Stage 1 (llava_arch): 576 -> 288 or 2880 -> 1440 (50% via visual self-attention)
+# Stage 2 (here): 288 -> target or 1440 -> target (text-guided progressive pruning)
+STAR_V2_SCHEDULE = {
+    "7b": {
+        # For pad mode: Stage 1 gives 288 tokens (576/2)
+        192: [(2, 240), (8, 200), (16, 192), (24, 192)],
+        128: [(2, 200), (8, 160), (16, 128), (24, 128)],
+        64: [(2, 160), (8, 120), (16, 80), (24, 64)],
+        32: [(2, 120), (8, 80), (16, 48), (24, 32)],
+    },
+    "13b": {
+        # For pad mode: Stage 1 gives 288 tokens (576/2)
+        192: [(2, 240), (10, 210), (20, 192), (30, 192)],
+        128: [(2, 220), (10, 180), (20, 140), (30, 128)],
+        64: [(2, 180), (10, 140), (20, 90), (30, 64)],
+        32: [(2, 140), (10, 100), (20, 60), (30, 32)],
+    }
+}
+
 
 class STARVLMModel(LlamaModel):
     """
-    STAR-FastV: Multi-Layer Progressive Pruning with FastV-style Importance Scoring
+    STAR-VLM: Multi-Layer Progressive Pruning with Attention-based Importance Scoring
 
-    Core mechanism:
-    1. Uses FastV's attention-based importance scoring (simpler than STAR's semantic blocks)
-    2. Applies progressive pruning across multiple layers (using STAR's schedule)
-    3. Simpler than full STAR: no semantic block discovery, just top-k selection
-
-    Key differences:
-    - vs STAR: No semantic block clustering, uses direct attention-based importance
-    - vs FastV: Prunes progressively at multiple scheduled layers (not just once at layer K)
+    Supports two modes:
+    1. STAR (original): Single-stage pruning from original visual tokens
+    2. STAR-V2 (two-stage):
+       - Stage 1 (llava_arch): Visual self-attention pruning (50% reduction)
+       - Stage 2 (here): Text-guided progressive pruning to target
     """
 
     def __init__(self, config: LlamaConfig, starvlm_config: Dict):
@@ -59,15 +76,28 @@ class STARVLMModel(LlamaModel):
             self.visual_token_length = 576
             self.anyres = False
 
-        # STAR-FastV config
+        # Config
         self.target_visual_tokens = starvlm_config["T"]
+        self.mode = starvlm_config.get("mode", "star")  # "star" or "star_v2"
 
-        # Load pruning schedule (same as STAR)
-        self.pruning_schedule = STAR_FASTV_SCHEDULE[self.scale][self.target_visual_tokens]
+        # Load pruning schedule based on mode
+        if self.mode == "star_v2":
+            # Two-stage mode: expect half tokens from Stage 1
+            self.visual_token_length = self.visual_token_length // 2
+            self.pruning_schedule = STAR_V2_SCHEDULE[self.scale][self.target_visual_tokens]
+            print(f"[STAR-V2 Stage 2] Initialized")
+            print(f"  Scale: {self.scale}")
+            print(f"  Expected input from Stage 1: {self.visual_token_length} tokens")
+            print(f"  Target tokens: {self.target_visual_tokens}")
+        else:
+            # Original single-stage mode
+            self.pruning_schedule = STAR_FASTV_SCHEDULE[self.scale][self.target_visual_tokens]
+            print(f"[STAR-FastV] Initialized")
+            print(f"  Scale: {self.scale}")
+            print(f"  Target tokens: {self.target_visual_tokens}")
+
         self.pruning_layers = {layer_idx: target for layer_idx, target in self.pruning_schedule}
-
-        print(f"[STAR-FastV] Initialized with scale={self.scale}, target={self.target_visual_tokens}")
-        print(f"[STAR-FastV] Pruning schedule: {self.pruning_schedule}")
+        print(f"  Pruning schedule: {self.pruning_schedule}")
 
         self.reset_state()
 
@@ -161,7 +191,9 @@ class STARVLMModel(LlamaModel):
             self.current_visual_length = actual_visual_length
             self.visual_token_indices = torch.arange(actual_visual_length, device=hidden_states.device)
             self.prefill_done = True
-            print(f"[STAR-FastV] Prefill: visual tokens = {self.current_visual_length}")
+
+            mode_name = "STAR-V2 Stage 2" if self.mode == "star_v2" else "STAR-FastV"
+            print(f"[{mode_name}] Prefill: visual tokens = {self.current_visual_length}")
 
         # Process layers with progressive pruning
         all_hidden_states = () if output_hidden_states else None
@@ -175,7 +207,7 @@ class STARVLMModel(LlamaModel):
 
             layer_idx = decoder_layer.self_attn.layer_idx + 1
 
-            # Apply FastV-style pruning at scheduled layers
+            # Apply text-guided pruning at scheduled layers
             if seq_length > 1 and self.prefill_done and layer_idx in self.pruning_layers:
                 target_visual_length = self.pruning_layers[layer_idx]
 
@@ -183,7 +215,8 @@ class STARVLMModel(LlamaModel):
                     visual_start = self.system_prompt_length
                     visual_end = visual_start + self.current_visual_length
 
-                    print(f"\n[STAR-FastV] Layer {layer_idx}: Pruning {self.current_visual_length} → {target_visual_length}")
+                    mode_name = "STAR-V2 Stage 2" if self.mode == "star_v2" else "STAR-FastV"
+                    print(f"\n[{mode_name}] Layer {layer_idx}: Pruning {self.current_visual_length} → {target_visual_length}")
 
                     # Forward pass to get attention scores
                     if self.gradient_checkpointing and self.training:
@@ -209,7 +242,7 @@ class STARVLMModel(LlamaModel):
                     hidden_states = layer_outputs[0]
                     layer_attention = layer_outputs[1]  # (B, num_heads, seq_len, seq_len)
 
-                    # FastV's importance scoring
+                    # Text-guided importance scoring
                     # Use the last text token's attention to visual tokens
                     # Average across heads: (B, seq_len, seq_len)
                     device = hidden_states.device
@@ -219,14 +252,14 @@ class STARVLMModel(LlamaModel):
                     # last_token_idx = -1 means the newest text token
                     visual_attention = attn_avg[0, -1, visual_start:visual_end]  # (N_vis,)
 
-                    print(f"[STAR-FastV] Visual attention stats: mean={visual_attention.mean():.4f}, "
+                    print(f"[{mode_name}] Visual attention stats: mean={visual_attention.mean():.4f}, "
                           f"std={visual_attention.std():.4f}, max={visual_attention.max():.4f}")
 
-                    # Select top-k important visual tokens (FastV-style)
+                    # Select top-k important visual tokens (text-guided)
                     keep_indices = torch.topk(visual_attention, k=target_visual_length).indices
                     keep_indices = keep_indices.sort().values  # Sort to maintain position order
 
-                    print(f"[STAR-FastV] Selected {len(keep_indices)} tokens using last token attention")
+                    print(f"[{mode_name}] Selected {len(keep_indices)} tokens using text-to-visual attention")
 
                     # Update indices and hidden states
                     self.visual_token_indices = self.visual_token_indices[keep_indices]
@@ -248,50 +281,30 @@ class STARVLMModel(LlamaModel):
                             position_ids[:, visual_end:]
                         ], dim=1)
 
-                    # Update current visual length
-                    self.current_visual_length = len(keep_indices)
+                    if attention_mask is not None and attention_mask.dim() == 4:
+                        new_mask_visual = attention_mask[:, :, :, visual_start:visual_end][:, :, :, keep_indices]
+                        attention_mask = torch.cat([
+                            attention_mask[:, :, :, :visual_start],
+                            new_mask_visual,
+                            attention_mask[:, :, :, visual_end:]
+                        ], dim=3)
 
-                    print(f"[STAR-FastV] Layer {layer_idx}: Pruned to {self.current_visual_length} tokens")
+                        new_mask_query = attention_mask[:, :, visual_start:visual_end, :][:, :, keep_indices, :]
+                        attention_mask = torch.cat([
+                            attention_mask[:, :, :visual_start, :],
+                            new_mask_query,
+                            attention_mask[:, :, visual_end:, :]
+                        ], dim=2)
 
-                    # Regenerate attention mask
-                    new_seq_length = hidden_states.shape[1]
-                    if attention_mask is not None:
-                        attention_mask = torch.ones(
-                            (batch_size, new_seq_length),
-                            dtype=torch.bool,
-                            device=hidden_states.device
-                        )
-                        if self._use_flash_attention_2:
-                            attention_mask = None
-                        elif self._use_sdpa and not output_attentions:
-                            attention_mask = _prepare_4d_causal_attention_mask_for_sdpa(
-                                attention_mask,
-                                (batch_size, new_seq_length),
-                                hidden_states,
-                                past_key_values_length,
-                            )
-                        else:
-                            attention_mask = _prepare_4d_causal_attention_mask(
-                                attention_mask,
-                                (batch_size, new_seq_length),
-                                hidden_states,
-                                past_key_values_length
-                            )
+                    self.current_visual_length = target_visual_length
+                    visual_token_sum += target_visual_length
 
                     if use_cache:
-                        next_decoder_cache = layer_outputs[2 if True else 1]
-                    if output_attentions:
-                        all_self_attns += (layer_outputs[1],)
-
-                    if seq_length > 1 and self.current_visual_length is not None:
-                        visual_token_sum += self.current_visual_length
+                        next_decoder_cache = layer_outputs[2 if output_attentions else 1]
 
                     continue
 
-            if seq_length > 1 and self.current_visual_length is not None:
-                visual_token_sum += self.current_visual_length
-
-            # Normal layer forward
+            # Regular layer forward pass (no pruning)
             if self.gradient_checkpointing and self.training:
                 layer_outputs = self._gradient_checkpointing_func(
                     decoder_layer.__call__,
@@ -322,20 +335,18 @@ class STARVLMModel(LlamaModel):
 
         hidden_states = self.norm(hidden_states)
 
-        if seq_length > 1 and self.prefill_done:
-            self.visual_token_num = visual_token_sum / len(self.layers)
-            print(f"[STAR-FastV] Average visual tokens across layers: {self.visual_token_num:.1f}")
+        if seq_length > 1:
+            self.visual_token_num = visual_token_sum / len(self.pruning_layers) if self.pruning_layers else 0
 
+        # Add hidden states from the last decoder layer
         if output_hidden_states:
             all_hidden_states += (hidden_states,)
 
         next_cache = None
         if use_cache:
             next_cache = next_decoder_cache.to_legacy_cache() if use_legacy_cache else next_decoder_cache
-
         if not return_dict:
             return tuple(v for v in [hidden_states, next_cache, all_hidden_states, all_self_attns] if v is not None)
-
         return BaseModelOutputWithPast(
             last_hidden_state=hidden_states,
             past_key_values=next_cache,
