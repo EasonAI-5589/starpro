@@ -1224,11 +1224,11 @@ class LlavaMetaForCausalLM(ABC):
 
         elif self.pruning_method == 'star_v2':
             # Two-Stage Pruning Framework
-            # Stage 1 (here in llava_arch): Visual self-attention pruning - keep 50% tokens
+            # Stage 1 (here in llava_arch): Visual diversity-aware pruning - keep 50% tokens
             # Stage 2 (in modeling_llama_star): Text-guided progressive pruning
 
             print(f"\n{'='*80}")
-            print(f"STAR-V2 Stage 1: Visual Self-Attention Pruning")
+            print(f"STAR-V2 Stage 1: Diversity-Aware Visual Pruning")
             print(f"{'='*80}")
 
             # Get visual self-attention
@@ -1238,7 +1238,7 @@ class LlavaMetaForCausalLM(ABC):
             B, N, C = image_features.shape
             device = image_features.device
 
-            # Stage 1: Keep 50% of original tokens using self-attention
+            # Stage 1: Keep 50% of original tokens using diversity-aware selection
             stage1_keep_num = N // 2  # 576 -> 288, or 2880 -> 1440
 
             print(f"[Stage 1 Config]")
@@ -1247,23 +1247,64 @@ class LlavaMetaForCausalLM(ABC):
             print(f"  Target tokens: {self.visual_token_num}")
             print(f"  Stage 2 will prune: {stage1_keep_num} -> {self.visual_token_num}")
 
-            # Use CLS attention (average across heads) as importance score
+            # CLS attention as importance score
             cls_attn = image_attentions.mean(dim=1)  # (B, N)
 
-            # Select top-k tokens based on self-attention
-            stage1_indices = cls_attn.topk(k=stage1_keep_num, dim=1).indices  # (B, stage1_keep_num)
-            stage1_indices_sorted = stage1_indices.sort(dim=1).values  # Keep spatial order
+            # Compute similarity matrix for diversity
+            image_normalized = image_features / image_features.norm(dim=-1, keepdim=True)
+            similarity_matrix = torch.matmul(image_normalized, image_normalized.transpose(1, 2))  # (B, N, N)
 
-            print(f"\n[Stage 1 Selection]")
-            print(f"  Selection method: Visual self-attention (CLS token)")
-            print(f"  Attention stats: mean={cls_attn.mean():.4f}, std={cls_attn.std():.4f}")
-            print(f"  Selected indices shape: {stage1_indices_sorted.shape}")
+            print(f"\n[Stage 1 Selection: Importance + Diversity]")
+            print(f"  Method: Greedy selection with CLS attention + similarity repulsion")
+
+            # Greedy selection: balance importance and diversity
+            selected_indices = []
+            for b in range(B):
+                selected = []
+                remaining = set(range(N))
+
+                for step in range(stage1_keep_num):
+                    if step == 0:
+                        # First: select the most important token
+                        idx = cls_attn[b].argmax().item()
+                    else:
+                        # Compute repulsion score: importance - max_similarity_to_selected
+                        scores = torch.zeros(N, device=device)
+                        for idx in remaining:
+                            # Importance from CLS attention
+                            importance = cls_attn[b, idx]
+                            # Repulsion: max similarity to already selected tokens
+                            max_sim = similarity_matrix[b, idx, selected].max() if selected else 0
+                            # Combined score: importance - repulsion (favor diverse tokens)
+                            scores[idx] = importance - 0.5 * max_sim  # 0.5 is diversity weight
+
+                        idx = scores.argmax().item()
+
+                    selected.append(idx)
+                    remaining.remove(idx)
+
+                selected_indices.append(sorted(selected))  # Keep spatial order
+
+            stage1_indices = torch.tensor(selected_indices, dtype=torch.long, device=device)
+
+            print(f"  CLS attention stats: mean={cls_attn.mean():.4f}, std={cls_attn.std():.4f}")
+            print(f"  Selected indices shape: {stage1_indices.shape}")
+
+            # Check diversity of selected tokens
+            selected_features = torch.gather(
+                image_normalized,
+                dim=1,
+                index=stage1_indices.unsqueeze(-1).expand(-1, -1, C)
+            )
+            selected_sim = torch.matmul(selected_features, selected_features.transpose(1, 2))
+            avg_sim = (selected_sim.sum(dim=(1,2)) - stage1_keep_num) / (stage1_keep_num * (stage1_keep_num - 1))
+            print(f"  Avg pairwise similarity of selected: {avg_sim.mean():.4f} (lower is more diverse)")
 
             # Gather selected features
             stage1_features = torch.gather(
                 image_features,
                 dim=1,
-                index=stage1_indices_sorted.unsqueeze(-1).expand(-1, -1, C)
+                index=stage1_indices.unsqueeze(-1).expand(-1, -1, C)
             )
 
             # Update image_features for Stage 2
