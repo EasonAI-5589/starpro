@@ -141,7 +141,7 @@ class LlavaMetaForCausalLM(ABC):
     def encode_images(self, images, texts=None):
         if 'prumerge' in self.pruning_method or self.pruning_method == 'visionzip' or self.pruning_method == 'fastervlm':
             image_features, image_attentions, image_keys, image_cls = self.get_model().get_vision_tower()(images, output_attentions=True)
-        elif self.pruning_method == 'trim' or self.pruning_method == 'cdp3' or 'thcp' in self.pruning_method:
+        elif self.pruning_method == 'trim' or self.pruning_method == 'cdp3' or 'thcp' in self.pruning_method or self.pruning_method == 'star_v3':
             # 🔥 添加这行调试
             print(f"Pruning method: {self.pruning_method}, texts is None: {texts is None}, texts value: {texts}")
             image_features, image_embeds, text_embeds = self.get_model().get_vision_tower()(images, texts=texts)
