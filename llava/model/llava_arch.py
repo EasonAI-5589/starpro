@@ -1223,12 +1223,12 @@ class LlavaMetaForCausalLM(ABC):
                 print(f"\n{'='*80}\n")
 
         elif self.pruning_method == 'star_v3':
-            # STAR-V3: Two-Stage Framework with THCP Stage 1
-            # Stage 1 (here): THCP text-concept coverage maximization - keep 50% tokens
-            # Stage 2 (in modeling_llama_star): Multi-token text-guided progressive pruning
+            # STAR-V3: Two-Stage Framework with THCP Stage 1 (Adaptive)
+            # Stage 1 (here): THCP pruning → keep target*2 tokens (adaptive to final target)
+            # Stage 2 (in modeling_llama_star): Progressive pruning → target*2 → target
 
             print(f"\n{'='*80}")
-            print(f"STAR-V3 Stage 1: THCP Text-Concept Coverage")
+            print(f"STAR-V3 Stage 1: THCP Text-Concept Coverage (Adaptive)")
             print(f"{'='*80}")
 
             # ========== 超参数配置（与THCP一致） ==========
@@ -1239,12 +1239,12 @@ class LlavaMetaForCausalLM(ABC):
             M = text_embeds.shape[0]
             text_normalized = text_embeds / (text_embeds.norm(dim=-1, keepdim=True) + 1e-8)
 
-            # Stage 1 target: keep 50% for Stage 2 (same as STAR-V2)
-            stage1_keep_num = N // 2  # 576 -> 288
+            # 🔥 STAR-V3 Adaptive: Stage 1 keeps target*2 tokens (not fixed 50%)
+            stage1_keep_num = self.visual_token_num * 2  # e.g., target=128 → keep 256
 
-            print(f"[Stage 1 Config - THCP Implementation]")
+            print(f"[Stage 1 Config - Adaptive to Target]")
             print(f"  Original tokens: {N}")
-            print(f"  Stage 1 keeps: {stage1_keep_num} (50%)")
+            print(f"  Stage 1 keeps: {stage1_keep_num} (target × 2)")
             print(f"  Final target: {self.visual_token_num}")
             print(f"  Text tokens (M): {M}")
 

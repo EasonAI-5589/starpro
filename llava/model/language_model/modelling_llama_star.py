@@ -43,6 +43,32 @@ STAR_V2_SCHEDULE = {
     }
 }
 
+# STAR-V3 Two-Stage Pruning Schedule (Adaptive)
+# Stage 1 (llava_arch): 576 -> target*2 (THCP pruning, adaptive to target)
+# Stage 2 (here): target*2 -> target (text-guided progressive pruning)
+# Goal: Average tokens across all layers = target budget (exact)
+# Strategy: 3 pruning steps with front-heavy distribution (more tokens in early layers)
+STAR_V3_SCHEDULE = {
+    "7b": {
+        # For pad mode: Stage 1 gives target*2 tokens
+        # 32 layers: 8 segments × (t_init + t1 + t2 + t3) / 32 = target
+        # Three pruning layers: 8 (25%), 16 (50%), 24 (75%)
+        192: [(8, 192), (16, 144), (24, 96)],      # Stage 1: 384 → Avg = 192.0
+        128: [(8, 128), (16, 96), (24, 32)],       # Stage 1: 256 → Avg = 128.0
+        64: [(8, 64), (16, 48), (24, 16)],         # Stage 1: 128 → Avg = 64.0
+        32: [(8, 32), (16, 24), (24, 8)],          # Stage 1: 64 → Avg = 32.0
+    },
+    "13b": {
+        # For pad mode: Stage 1 gives target*2 tokens
+        # 40 layers: 10 segments × (t_init + t1 + t2 + t3) / 40 = target
+        # Three pruning layers: 10 (25%), 20 (50%), 30 (75%)
+        192: [(10, 192), (20, 144), (30, 96)],     # Stage 1: 384 → Avg = 192.0
+        128: [(10, 128), (20, 96), (30, 32)],      # Stage 1: 256 → Avg = 128.0
+        64: [(10, 64), (20, 48), (30, 16)],        # Stage 1: 128 → Avg = 64.0
+        32: [(10, 32), (20, 24), (30, 8)],         # Stage 1: 64 → Avg = 32.0
+    }
+}
+
 
 class STARVLMModel(LlamaModel):
     """
@@ -84,15 +110,23 @@ class STARVLMModel(LlamaModel):
         self.mode = starvlm_config.get("mode", "star")  # "star", "star_v2", or "star_v3"
 
         # Load pruning schedule based on mode
-        if self.mode in ["star_v2", "star_v3"]:
-            # Two-stage mode: expect half tokens from Stage 1
+        if self.mode == "star_v3":
+            # STAR-V3: Two-stage mode with adaptive schedule (Stage 1 gives target*2)
+            self.visual_token_length = self.target_visual_tokens * 2
+            self.pruning_schedule = STAR_V3_SCHEDULE[self.scale][self.target_visual_tokens]
+            print(f"[STAR-V3 Stage 2] Initialized")
+            print(f"  Scale: {self.scale}")
+            print(f"  Expected input from Stage 1: {self.visual_token_length} tokens (target × 2)")
+            print(f"  Stage 1 method: THCP (adaptive to target)")
+            print(f"  Target tokens: {self.target_visual_tokens}")
+        elif self.mode == "star_v2":
+            # STAR-V2: Two-stage mode (Stage 1 gives 288 tokens, fixed 50%)
             self.visual_token_length = self.visual_token_length // 2
             self.pruning_schedule = STAR_V2_SCHEDULE[self.scale][self.target_visual_tokens]
-            mode_name = "STAR-V3" if self.mode == "star_v3" else "STAR-V2"
-            print(f"[{mode_name} Stage 2] Initialized")
+            print(f"[STAR-V2 Stage 2] Initialized")
             print(f"  Scale: {self.scale}")
             print(f"  Expected input from Stage 1: {self.visual_token_length} tokens")
-            print(f"  Stage 1 method: {'THCP' if self.mode == 'star_v3' else 'Self-similarity'}")
+            print(f"  Stage 1 method: Self-similarity")
             print(f"  Target tokens: {self.target_visual_tokens}")
         else:
             # Original single-stage mode
