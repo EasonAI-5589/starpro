@@ -1517,12 +1517,8 @@ class LlavaMetaForCausalLM(ABC):
             print(f"  Ready for Stage 2 text-guided progressive pruning")
             print(f"{'='*80}\n")
 
-        # Apply mm_projector to project visual features to LLM space
-        image_features = self.get_model().mm_projector(image_features)
-
-        if merged_features is not None:
-            merged_features = self.get_model().mm_projector(merged_features)
-
+        # Note: mm_projector is already applied at line 307
+        # No need to apply again here
         return image_features, index_masks, merged_features
 
     def prepare_inputs_labels_for_multimodal(
