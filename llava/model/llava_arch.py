@@ -1525,8 +1525,11 @@ class LlavaMetaForCausalLM(ABC):
             print(f"  Ready for Stage 2 text-guided progressive pruning")
             print(f"{'='*80}\n")
 
-        # Note: mm_projector is already applied at line 307
-        # No need to apply again here
+        # 🔥 STAR-V2/V2-Anchor need mm_projector (they bypassed line 307)
+        if self.pruning_method in ['star_v2', 'star_v2_anchor']:
+            image_features = self.get_model().mm_projector(image_features)
+
+        # Note: For other methods, mm_projector is already applied at line 307
         return image_features, index_masks, merged_features
 
     def prepare_inputs_labels_for_multimodal(
