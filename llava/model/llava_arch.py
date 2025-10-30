@@ -1242,15 +1242,15 @@ class LlavaMetaForCausalLM(ABC):
             # Stage 1 target: keep 50% for Stage 2 (same as STAR-V2)
             stage1_keep_num = N // 2  # 576 -> 288
 
-            print(f"[Stage 1 Config]")
+            print(f"[Stage 1 Config - THCP Implementation]")
             print(f"  Original tokens: {N}")
             print(f"  Stage 1 keeps: {stage1_keep_num} (50%)")
             print(f"  Final target: {self.visual_token_num}")
             print(f"  Text tokens (M): {M}")
 
-            # 判断使用哪种模式
+            # 判断使用哪种模式（与THCP完全一致）
             use_coverage_mode = (M > 1)
-            print(f"  Using {'Coverage' if use_coverage_mode else 'Relevance'} mode")
+            print(f"  THCP Mode: {'Coverage (M>1)' if use_coverage_mode else 'Relevance (M=1)'}")
 
             all_masks = []
 
@@ -1270,7 +1270,8 @@ class LlavaMetaForCausalLM(ABC):
                 visual_similarity = torch.matmul(visual_feat_b_norm, visual_feat_b_norm.t())  # (N, N)
 
                 if use_coverage_mode:
-                    # ==================== Coverage Mode (M > 1) ====================
+                    # ==================== THCP Coverage Mode (M > 1) ====================
+                    # 计算文本重要性：结合视觉激活度和文本唯一性
                     text_visual_activation = response_matrix.max(dim=0).values
                     text_sim_matrix = torch.matmul(text_normalized, text_normalized.t())
                     text_uniqueness = 1 - (text_sim_matrix.sum(dim=-1) - 1) / max(M - 1, 1)
@@ -1279,15 +1280,17 @@ class LlavaMetaForCausalLM(ABC):
 
                     text_coverage = torch.zeros(M, device=device)
 
-                    # 🔥 关键：选择 stage1_keep_num 个tokens（而不是 self.visual_token_num）
+                    # 🔥 THCP贪心算法：选择 stage1_keep_num 个tokens
                     for step in range(stage1_keep_num):
                         if not available_mask.any():
                             break
 
                         if step == 0:
+                            # 第一步：选择覆盖最多重要文本的token
                             coverage_scores = (response_matrix * text_importance.unsqueeze(0)).sum(dim=-1)
                             scores = coverage_scores
                         else:
+                            # 后续步骤：平衡文本覆盖增益和视觉多样性
                             new_coverage = torch.maximum(text_coverage.unsqueeze(0), response_matrix)
                             coverage_gain = (new_coverage - text_coverage.unsqueeze(0)) * text_importance.unsqueeze(0)
                             total_coverage_gain = coverage_gain.sum(dim=-1)
@@ -1305,19 +1308,22 @@ class LlavaMetaForCausalLM(ABC):
                         text_coverage = torch.maximum(text_coverage, response_matrix[selected_idx])
 
                 else:
-                    # ==================== Relevance Mode (M = 1) ====================
+                    # ==================== THCP Relevance Mode (M = 1) ====================
+                    # 计算文本相关性（取负并归一化）
                     text_relevance = response_matrix.squeeze(-1)  # (N,)
-                    text_relevance = -text_relevance
+                    text_relevance = -text_relevance  # 与THCP一致
                     text_relevance = (text_relevance - text_relevance.min() + 1e-6) / (text_relevance.max() - text_relevance.min())
 
-                    # 🔥 关键：选择 stage1_keep_num 个tokens（而不是 self.visual_token_num）
+                    # 🔥 THCP贪心算法：平衡相关性和多样性
                     for step in range(stage1_keep_num):
                         if not available_mask.any():
                             break
 
                         if step == 0:
+                            # 第一步：选择相关性最高的token
                             scores = text_relevance.clone()
                         else:
+                            # 后续步骤：平衡文本相关性和视觉多样性
                             selected_tensor = torch.tensor(selected_indices, device=device)
                             relevance_scores = text_relevance.clone()
                             max_similarity_to_selected = visual_similarity[:, selected_tensor].max(dim=1).values
@@ -1334,14 +1340,16 @@ class LlavaMetaForCausalLM(ABC):
                 batch_mask[torch.tensor(selected_indices, device=device)] = True
                 all_masks.append(batch_mask)
 
-            # 🔥 关键：生成 (B, N) 的 index_masks，和THCP完全一样
+            # 🔥 关键：生成 (B, N) 的 index_masks
             index_masks = torch.stack(all_masks, dim=0)
 
-            print(f"\n[Stage 1 Output]")
+            print(f"\n[Stage 1 Output - THCP Selection Complete]")
             print(f"  index_masks shape: {index_masks.shape}  # (B, N)")
             print(f"  Selected tokens per batch: {index_masks.sum(dim=1).tolist()}")
-            print(f"  image_features unchanged: {image_features.shape}")
-            print(f"  Ready for mm_projector and Stage 2")
+            print(f"  image_features shape: {image_features.shape}  # (B, N, D)")
+            print(f"  ✓ THCP Stage 1 complete")
+            print(f"  ✓ Ready for mm_projector")
+            print(f"  ✓ Ready for Stage 2 progressive pruning in modeling_llama_star")
             print(f"{'='*80}\n")
 
         elif self.pruning_method == 'star_v2':
