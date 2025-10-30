@@ -1222,6 +1222,128 @@ class LlavaMetaForCausalLM(ABC):
             if enable_debug:
                 print(f"\n{'='*80}\n")
 
+        elif self.pruning_method == 'star_v3':
+            # STAR-V3: Two-Stage Framework with THCP Stage 1
+            # Stage 1 (here): THCP text-concept coverage maximization - keep 50% tokens
+            # Stage 2 (in modeling_llama_star): Multi-token text-guided progressive pruning
+
+            print(f"\n{'='*80}")
+            print(f"STAR-V3 Stage 1: THCP Text-Concept Coverage")
+            print(f"{'='*80}")
+
+            # ========== 超参数配置（与THCP一致） ==========
+            coverage_weight = 0.7  # M>1时的覆盖权重
+            relevance_weight = 0.5  # M=1时的相关性权重
+            diversity_weight = 0.5  # 多样性权重
+
+            M = text_embeds.shape[0]
+            text_normalized = text_embeds / (text_embeds.norm(dim=-1, keepdim=True) + 1e-8)
+
+            # Stage 1 target: keep 50% for Stage 2 (same as STAR-V2)
+            stage1_keep_num = N // 2  # 576 -> 288
+
+            print(f"[Stage 1 Config]")
+            print(f"  Original tokens: {N}")
+            print(f"  Stage 1 keeps: {stage1_keep_num} (50%)")
+            print(f"  Final target: {self.visual_token_num}")
+            print(f"  Text tokens (M): {M}")
+
+            # 判断使用哪种模式
+            use_coverage_mode = (M > 1)
+            print(f"  Using {'Coverage' if use_coverage_mode else 'Relevance'} mode")
+
+            all_masks = []
+
+            for b in range(B):
+                image_emb_b = image_embeds[b]  # (N, C)
+                image_emb_b_norm = image_emb_b / (image_emb_b.norm(dim=-1, keepdim=True) + 1e-8)
+
+                # 计算文本-视觉响应矩阵
+                response_matrix = torch.matmul(image_emb_b_norm, text_normalized.t())  # (N, M)
+
+                selected_indices = []
+                available_mask = torch.ones(N, dtype=torch.bool, device=device)
+
+                # 预计算视觉相似度矩阵
+                visual_feat_b = image_features[b]  # (N, D)
+                visual_feat_b_norm = visual_feat_b / (visual_feat_b.norm(dim=-1, keepdim=True) + 1e-8)
+                visual_similarity = torch.matmul(visual_feat_b_norm, visual_feat_b_norm.t())  # (N, N)
+
+                if use_coverage_mode:
+                    # ==================== Coverage Mode (M > 1) ====================
+                    text_visual_activation = response_matrix.max(dim=0).values
+                    text_sim_matrix = torch.matmul(text_normalized, text_normalized.t())
+                    text_uniqueness = 1 - (text_sim_matrix.sum(dim=-1) - 1) / max(M - 1, 1)
+                    text_importance = 0.7 * text_visual_activation + 0.3 * text_uniqueness
+                    text_importance = text_importance / (text_importance.sum() + 1e-8)
+
+                    text_coverage = torch.zeros(M, device=device)
+
+                    # 🔥 关键：选择 stage1_keep_num 个tokens（而不是 self.visual_token_num）
+                    for step in range(stage1_keep_num):
+                        if not available_mask.any():
+                            break
+
+                        if step == 0:
+                            coverage_scores = (response_matrix * text_importance.unsqueeze(0)).sum(dim=-1)
+                            scores = coverage_scores
+                        else:
+                            new_coverage = torch.maximum(text_coverage.unsqueeze(0), response_matrix)
+                            coverage_gain = (new_coverage - text_coverage.unsqueeze(0)) * text_importance.unsqueeze(0)
+                            total_coverage_gain = coverage_gain.sum(dim=-1)
+
+                            selected_tensor = torch.tensor(selected_indices, device=device)
+                            max_similarity_to_selected = visual_similarity[:, selected_tensor].max(dim=1).values
+                            diversity_scores = 1 - max_similarity_to_selected
+
+                            scores = coverage_weight * total_coverage_gain + diversity_weight * diversity_scores
+
+                        scores[~available_mask] = -float('inf')
+                        selected_idx = torch.argmax(scores).item()
+                        selected_indices.append(selected_idx)
+                        available_mask[selected_idx] = False
+                        text_coverage = torch.maximum(text_coverage, response_matrix[selected_idx])
+
+                else:
+                    # ==================== Relevance Mode (M = 1) ====================
+                    text_relevance = response_matrix.squeeze(-1)  # (N,)
+                    text_relevance = -text_relevance
+                    text_relevance = (text_relevance - text_relevance.min() + 1e-6) / (text_relevance.max() - text_relevance.min())
+
+                    # 🔥 关键：选择 stage1_keep_num 个tokens（而不是 self.visual_token_num）
+                    for step in range(stage1_keep_num):
+                        if not available_mask.any():
+                            break
+
+                        if step == 0:
+                            scores = text_relevance.clone()
+                        else:
+                            selected_tensor = torch.tensor(selected_indices, device=device)
+                            relevance_scores = text_relevance.clone()
+                            max_similarity_to_selected = visual_similarity[:, selected_tensor].max(dim=1).values
+                            diversity_scores = 1 - max_similarity_to_selected
+                            scores = relevance_weight * relevance_scores + diversity_weight * diversity_scores
+
+                        scores[~available_mask] = -float('inf')
+                        selected_idx = torch.argmax(scores).item()
+                        selected_indices.append(selected_idx)
+                        available_mask[selected_idx] = False
+
+                # 构建mask（关键：保持 (N,) 维度，和THCP一样）
+                batch_mask = torch.zeros(N, dtype=torch.bool, device=device)
+                batch_mask[torch.tensor(selected_indices, device=device)] = True
+                all_masks.append(batch_mask)
+
+            # 🔥 关键：生成 (B, N) 的 index_masks，和THCP完全一样
+            index_masks = torch.stack(all_masks, dim=0)
+
+            print(f"\n[Stage 1 Output]")
+            print(f"  index_masks shape: {index_masks.shape}  # (B, N)")
+            print(f"  Selected tokens per batch: {index_masks.sum(dim=1).tolist()}")
+            print(f"  image_features unchanged: {image_features.shape}")
+            print(f"  Ready for mm_projector and Stage 2")
+            print(f"{'='*80}\n")
+
         elif self.pruning_method == 'star_v2':
             # Two-Stage Pruning Framework
             # Stage 1 (here in llava_arch): Visual diversity-aware pruning - keep 50% tokens

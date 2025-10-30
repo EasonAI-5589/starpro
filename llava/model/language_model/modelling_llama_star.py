@@ -81,16 +81,18 @@ class STARVLMModel(LlamaModel):
 
         # Config
         self.target_visual_tokens = starvlm_config["T"]
-        self.mode = starvlm_config.get("mode", "star")  # "star" or "star_v2"
+        self.mode = starvlm_config.get("mode", "star")  # "star", "star_v2", or "star_v3"
 
         # Load pruning schedule based on mode
-        if self.mode == "star_v2":
+        if self.mode in ["star_v2", "star_v3"]:
             # Two-stage mode: expect half tokens from Stage 1
             self.visual_token_length = self.visual_token_length // 2
             self.pruning_schedule = STAR_V2_SCHEDULE[self.scale][self.target_visual_tokens]
-            print(f"[STAR-V2 Stage 2] Initialized")
+            mode_name = "STAR-V3" if self.mode == "star_v3" else "STAR-V2"
+            print(f"[{mode_name} Stage 2] Initialized")
             print(f"  Scale: {self.scale}")
             print(f"  Expected input from Stage 1: {self.visual_token_length} tokens")
+            print(f"  Stage 1 method: {'THCP' if self.mode == 'star_v3' else 'Self-similarity'}")
             print(f"  Target tokens: {self.target_visual_tokens}")
         else:
             # Original single-stage mode
@@ -195,7 +197,12 @@ class STARVLMModel(LlamaModel):
             self.visual_token_indices = torch.arange(actual_visual_length, device=hidden_states.device)
             self.prefill_done = True
 
-            mode_name = "STAR-V2 Stage 2" if self.mode == "star_v2" else "STAR-FastV"
+            if self.mode == "star_v3":
+                mode_name = "STAR-V3 Stage 2"
+            elif self.mode == "star_v2":
+                mode_name = "STAR-V2 Stage 2"
+            else:
+                mode_name = "STAR-FastV"
             print(f"[{mode_name}] Prefill: visual tokens = {self.current_visual_length}")
 
         # Process layers with progressive pruning
@@ -222,7 +229,12 @@ class STARVLMModel(LlamaModel):
                     visual_start = self.system_prompt_length
                     visual_end = visual_start + self.current_visual_length
 
-                    mode_name = "STAR-V2 Stage 2" if self.mode == "star_v2" else "STAR-FastV"
+                    if self.mode == "star_v3":
+                        mode_name = "STAR-V3 Stage 2"
+                    elif self.mode == "star_v2":
+                        mode_name = "STAR-V2 Stage 2"
+                    else:
+                        mode_name = "STAR-FastV"
                     print(f"\n[{mode_name}] Layer {layer_idx}: Pruning {self.current_visual_length} → {target_visual_length}")
 
                     # Forward pass to get attention scores
@@ -251,9 +263,9 @@ class STARVLMModel(LlamaModel):
 
                     device = hidden_states.device
 
-                    # STAR-V2: Multi-text-token guidance (inspired by SparseVLM)
+                    # STAR-V2/V3: Multi-text-token guidance (inspired by SparseVLM)
                     # Unlike PDrop which only uses last token, we identify important text tokens
-                    if self.mode == "star_v2":
+                    if self.mode in ["star_v2", "star_v3"]:
                         # Extract visual and text hidden states
                         visual_hidden = hidden_states[:, visual_start:visual_end]  # (B, N_vis, D)
                         text_hidden = hidden_states[:, visual_end:]  # (B, N_text, D)
