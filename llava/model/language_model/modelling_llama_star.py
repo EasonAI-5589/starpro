@@ -47,25 +47,32 @@ STAR_V2_SCHEDULE = {
 # Stage 1 (llava_arch): 576 -> target*2 (THCP pruning, adaptive to target)
 # Stage 2 (here): target*2 -> target (text-guided progressive pruning)
 # Goal: Average tokens across all layers = target budget (exact)
-# Strategy: 3 pruning steps with front-heavy distribution (more tokens in early layers)
+# Strategy: 2-3 pruning steps with front-heavy distribution (more tokens in early layers)
+# Note: For anyres mode, target is automatically multiplied by 5 in __init__
 STAR_V3_SCHEDULE = {
     "7b": {
-        # For pad mode: Stage 1 gives target*2 tokens
-        # 32 layers: 8 segments × (t_init + t1 + t2 + t3) / 32 = target
-        # Three pruning layers: 8 (25%), 16 (50%), 24 (75%)
+        # Pad mode targets (user passes T, actual target = T)
         192: [(8, 192), (16, 144), (24, 96)],      # Stage 1: 384 → Avg = 192.0
-        128: [(12, 64), (24, 32)],        # Avg = 128.0 (aggressive pruning)
-        64: [(12, 32), (24, 16)],         # Stage 1: 128 → Avg = 64.0
-        32: [(12, 16), (24, 8)],          # Stage 1: 64 → Avg = 32.0
+        128: [(12, 64), (24, 32)],                 # Stage 1: 256 → Avg = 128.0 (aggressive pruning)
+        64: [(12, 32), (24, 16)],                  # Stage 1: 128 → Avg = 64.0
+        32: [(12, 16), (24, 8)],                   # Stage 1: 64 → Avg = 32.0
+        # Anyres mode targets (user passes T, actual target = T*5)
+        960: [(8, 960), (16, 720), (24, 480)],     # Stage 1: 1920 → Avg = 960.0 (user T=192)
+        640: [(12, 320), (24, 160)],               # Stage 1: 1280 → Avg = 640.0 (user T=128)
+        320: [(12, 160), (24, 80)],                # Stage 1: 640 → Avg = 320.0 (user T=64)
+        160: [(12, 80), (24, 40)],                 # Stage 1: 320 → Avg = 160.0 (user T=32)
     },
     "13b": {
-        # For pad mode: Stage 1 gives target*2 tokens
-        # 40 layers: 10 segments × (t_init + t1 + t2 + t3) / 40 = target
-        # Three pruning layers: 10 (25%), 20 (50%), 30 (75%)
+        # Pad mode targets (user passes T, actual target = T)
         192: [(15, 128), (30, 64)],                # Stage 1: 384 → Avg = 192.0
         128: [(15, 64), (30, 32)],                 # Stage 1: 256 → Avg = 128.0
         64: [(15, 32), (30, 16)],                  # Stage 1: 128 → Avg = 64.0
         32: [(15, 16), (30, 8)],                   # Stage 1: 64  → Avg = 32.0
+        # Anyres mode targets (user passes T, actual target = T*5)
+        960: [(15, 640), (30, 320)],               # Stage 1: 1920 → Avg = 960.0 (user T=192)
+        640: [(15, 320), (30, 160)],               # Stage 1: 1280 → Avg = 640.0 (user T=128)
+        320: [(15, 160), (30, 80)],                # Stage 1: 640 → Avg = 320.0 (user T=64)
+        160: [(15, 80), (30, 40)],                 # Stage 1: 320 → Avg = 160.0 (user T=32)
     }
 }
 
@@ -111,11 +118,14 @@ class STARVLMModel(LlamaModel):
         # Load pruning schedule based on mode
         if self.mode == "star_v3":
             # STAR-V3: Two-stage mode with adaptive schedule (Stage 1 gives target*2)
+            # Note: User should pass T=128 for pad, T=640 for anyres (manually adjusted)
             self.visual_token_length = self.target_visual_tokens * 2
             self.pruning_schedule = STAR_V3_SCHEDULE[self.scale][self.target_visual_tokens]
             print(f"[STAR-V3 Stage 2] Initialized")
             print(f"  Scale: {self.scale}")
-            print(f"  Expected input from Stage 1: {self.visual_token_length} tokens (target × 2)")
+            print(f"  Aspect ratio: {'anyres' if self.anyres else 'pad'}")
+            print(f"  User passed T: {starvlm_config['T']}")
+            print(f"  Expected input from Stage 1: {self.visual_token_length} tokens (T × 2)")
             print(f"  Stage 1 method: THCP (adaptive to target)")
             print(f"  Target tokens: {self.target_visual_tokens}")
         elif self.mode == "star_v2":

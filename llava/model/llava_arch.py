@@ -1240,7 +1240,7 @@ class LlavaMetaForCausalLM(ABC):
             text_normalized = text_embeds / (text_embeds.norm(dim=-1, keepdim=True) + 1e-8)
 
             # 🔥 STAR-V3 Adaptive: Stage 1 keeps target*2 tokens (not fixed 50%)
-            stage1_keep_num = self.visual_token_num * 2  # e.g., target=128 → keep 256
+            stage1_keep_num = self.visual_token_num * 2  # e.g., target=128 → keep 256, target=640 → keep 1280
 
             print(f"[Stage 1 Config - Adaptive to Target]")
             print(f"  Original tokens: {N}")
