@@ -1,0 +1,7 @@
+{"question_id": 31311010, "prompt": "Are there bikes in the picture?\nAnswer the question using a single word or phrase.", "text": "No", "answer_id": "P7i6tSgYvLNZDLs48cNAab", "model_id": "llava-v1.6-vicuna-7b", "metadata": {}}
+{"question_id": 31311012, "prompt": "What is the color of umbrella?\nAnswer the question using a single word or phrase.", "text": "White", "answer_id": "QQAHU47yAn4wmRNAP2gZqh", "model_id": "llava-v1.6-vicuna-7b", "metadata": {}}
+{"question_id": 577445005, "prompt": "What animal is this?\nAnswer the question using a single word or phrase.", "text": "Cow", "answer_id": "9gTE4knGWAGAJNAGW5i7dC", "model_id": "llava-v1.6-vicuna-7b", "metadata": {}}
+{"question_id": 577445003, "prompt": "Is the animal's back flat?\nAnswer the question using a single word or phrase.", "text": "No", "answer_id": "ejjvSYPZtamKL2R2ZGtaZW", "model_id": "llava-v1.6-vicuna-7b", "metadata": {}}
+{"question_id": 577445004, "prompt": "Is the animal alone?\nAnswer the question using a single word or phrase.", "text": "Yes", "answer_id": "SXbR9TUoPbunEkvm4rpuX3", "model_id": "llava-v1.6-vicuna-7b", "metadata": {}}
+{"question_id": 286177001, "prompt": "What's all covered the ground?\nAnswer the question using a single word or phrase.", "text": "Snow", "answer_id": "6K6wpJcToJT8NPTKoPzvnh", "model_id": "llava-v1.6-vicuna-7b", "metadata": {}}
+{"question_id": 286177004, "prompt": "Is his helmet yellow?\nAnswer the question using a single word or phrase.", "text": "Yes", "answer_id": "WgehMBz4Xwze2Kj9rw9vXQ", "model_id": "llava-v1.6-vicuna-7b", "metadata": {}}
