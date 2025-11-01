@@ -51,7 +51,7 @@ done
 # 保存结果
 RESULT_DIR="/mnt/bn/bes-nas-zqz-lq-v6arnold6/mlx/users/zhangqizhe/code/EasonAI/STAR-LLaVA/results"
 mkdir -p ${RESULT_DIR}
-LOG_FILE="${RESULT_DIR}/textvqa_${MODEL_VERSION}_${MODEL_SCALE}_${METHOD}_vtn${TOKEN}.log"
+LOG_FILE="${RESULT_DIR}/textvqa_${CKPT}_${METHOD}_vtn${TOKEN}.log"
 
 # 写入配置和结果
 echo ">>> 实验配置：" > ${LOG_FILE}

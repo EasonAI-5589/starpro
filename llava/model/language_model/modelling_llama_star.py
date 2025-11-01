@@ -169,6 +169,57 @@ class STARVLMModel(LlamaModel):
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
 
+        # ============ DEBUG: 追踪序列长度来源 ============
+        if past_key_values is None:  # 只在 prefill 阶段打印
+            print("\n" + "="*80)
+            print("🔍 [STAR-V3 DEBUG] Forward Input Analysis")
+            print("="*80)
+            
+            # 1. 检查输入来源
+            if input_ids is not None:
+                print(f"✓ Input via: input_ids")
+                print(f"  - Shape: {input_ids.shape}")
+                print(f"  - Batch size: {input_ids.shape[0]}")
+                print(f"  - Sequence length: {input_ids.shape[1]}")
+                seq_length = input_ids.shape[1]
+            elif inputs_embeds is not None:
+                print(f"✓ Input via: inputs_embeds")
+                print(f"  - Shape: {inputs_embeds.shape}")
+                print(f"  - Batch size: {inputs_embeds.shape[0]}")
+                print(f"  - Sequence length: {inputs_embeds.shape[1]}")
+                seq_length = inputs_embeds.shape[1]
+            else:
+                print("✗ No input provided!")
+                seq_length = 0
+            
+            # 2. 分析序列组成
+            print(f"\n📊 Sequence Structure Analysis:")
+            print(f"  Total length: {seq_length}")
+            print(f"  ├─ System prompt: 0-{self.system_prompt_length-1} ({self.system_prompt_length} tokens)")
+            print(f"  ├─ Visual tokens: {self.system_prompt_length}-{self.system_prompt_length + self.visual_token_length - 1} ({self.visual_token_length} tokens)")
+            print(f"  └─ Text tokens: {self.system_prompt_length + self.visual_token_length}-{seq_length-1} ({seq_length - self.system_prompt_length - self.visual_token_length} tokens)")
+            
+            # 3. 检查是否合理
+            expected_min_length = self.system_prompt_length + self.visual_token_length
+            if seq_length < expected_min_length:
+                print(f"\n⚠️  WARNING: Sequence too short! Expected at least {expected_min_length}, got {seq_length}")
+            elif seq_length - expected_min_length > 500:
+                print(f"\n⚠️  WARNING: Text tokens unusually long ({seq_length - expected_min_length} tokens)!")
+                print(f"    This might include conversation history or long context.")
+            
+            # 4. 如果有 input_ids，尝试查看内容
+            if input_ids is not None:
+                print(f"\n📝 Token ID Samples:")
+                print(f"  System tokens [0:10]: {input_ids[0, :10].tolist()}")
+                print(f"  Visual tokens [35:45]: {input_ids[0, 35:45].tolist()}")
+                
+                text_start = self.system_prompt_length + self.visual_token_length
+                if text_start < seq_length:
+                    print(f"  Text tokens [{text_start}:{text_start+10}]: {input_ids[0, text_start:text_start+10].tolist()}")
+                    print(f"  Last text tokens [{seq_length-10}:{seq_length}]: {input_ids[0, -10:].tolist()}")
+            
+            print("="*80 + "\n")
+
         if past_key_values is None:
             self.reset_state()
 

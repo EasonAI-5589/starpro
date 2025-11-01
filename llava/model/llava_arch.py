@@ -1231,6 +1231,10 @@ class LlavaMetaForCausalLM(ABC):
             print(f"STAR-V3 Stage 1: THCP Text-Concept Coverage (Adaptive)")
             print(f"{'='*80}")
 
+            # ========== 检测 anyres 多 patch 情况 ==========
+            is_anyres_multi_patch = (B > 1 and
+                                     getattr(self.config, 'image_aspect_ratio', 'square') == 'anyres')
+
             # ========== 超参数配置（与THCP一致） ==========
             coverage_weight = 0.7  # M>1时的覆盖权重
             relevance_weight = 0.5  # M=1时的相关性权重
@@ -1242,9 +1246,19 @@ class LlavaMetaForCausalLM(ABC):
             # 🔥 STAR-V3 Adaptive: Stage 1 keeps target*2 tokens (not fixed 50%)
             stage1_keep_num = self.visual_token_num * 2  # e.g., target=128 → keep 256, target=640 → keep 1280
 
+            # 🔥 Anyres 多 patch：每个 patch 按比例分配 tokens
+            if is_anyres_multi_patch:
+                tokens_per_patch = stage1_keep_num // B
+                print(f"[Anyres Multi-Patch Detected]")
+                print(f"  {B} patches × {N} tokens/patch = {B * N} total tokens")
+                print(f"  Each patch keeps: {tokens_per_patch} tokens")
+                print(f"  Total after Stage 1: {tokens_per_patch * B} tokens")
+            else:
+                tokens_per_patch = stage1_keep_num
+
             print(f"[Stage 1 Config - Adaptive to Target]")
-            print(f"  Original tokens: {N}")
-            print(f"  Stage 1 keeps: {stage1_keep_num} (target × 2)")
+            print(f"  Original tokens per patch: {N}")
+            print(f"  Stage 1 keeps per patch: {tokens_per_patch}")
             print(f"  Final target: {self.visual_token_num}")
             print(f"  Text tokens (M): {M}")
 
@@ -1280,8 +1294,8 @@ class LlavaMetaForCausalLM(ABC):
 
                     text_coverage = torch.zeros(M, device=device)
 
-                    # 🔥 THCP贪心算法：选择 stage1_keep_num 个tokens
-                    for step in range(stage1_keep_num):
+                    # 🔥 THCP贪心算法：选择 tokens_per_patch 个tokens
+                    for step in range(tokens_per_patch):
                         if not available_mask.any():
                             break
 
@@ -1315,7 +1329,7 @@ class LlavaMetaForCausalLM(ABC):
                     text_relevance = (text_relevance - text_relevance.min() + 1e-6) / (text_relevance.max() - text_relevance.min())
 
                     # 🔥 THCP贪心算法：平衡相关性和多样性
-                    for step in range(stage1_keep_num):
+                    for step in range(tokens_per_patch):
                         if not available_mask.any():
                             break
 
