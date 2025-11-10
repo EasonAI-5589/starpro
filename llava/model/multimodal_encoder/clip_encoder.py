@@ -120,19 +120,33 @@ class CLIPVisionTower(nn.Module):
                     text_segment = (text_inputs.input_ids.shape[1] - 1) // self.max_position_embeddings + 1
                     text_padding = self.max_position_embeddings * text_segment - text_inputs.input_ids.shape[1]
                     # Get the device of text_tower (may differ from vision tower when using accelerate)
-                    text_tower_device = next(self.text_tower.parameters()).device
+                    try:
+                        text_tower_device = next(self.text_tower.parameters()).device
+                    except (StopIteration, AttributeError):
+                        text_tower_device = self.device
                     text_inputs = {
                         k: torch.cat([v, v.new_zeros((v.shape[0], text_padding))],
                                      dim=1).reshape(-1, self.max_position_embeddings).to(device=text_tower_device)
                         for k, v in text_inputs.items()
                     }
                     text_embeds = self.text_tower(**text_inputs).text_embeds
-            
+
             torch.cuda.synchronize()
 
             if texts is not None:
-                image_embeds = self.vision_tower.vision_model.post_layernorm(image_outputs)
-                image_embeds = self.vision_tower.visual_projection(image_embeds.float())
+                # Get devices for vision_tower components (may differ when using accelerate)
+                try:
+                    post_ln_device = next(self.vision_tower.vision_model.post_layernorm.parameters()).device
+                except (StopIteration, AttributeError):
+                    post_ln_device = self.device
+                try:
+                    projection_device = next(self.vision_tower.visual_projection.parameters()).device
+                except (StopIteration, AttributeError):
+                    projection_device = self.device
+
+                # Move tensors to correct devices
+                image_embeds = self.vision_tower.vision_model.post_layernorm(image_outputs.to(post_ln_device))
+                image_embeds = self.vision_tower.visual_projection(image_embeds.float().to(projection_device))
                 image_features = (image_features, image_embeds, text_embeds)
 
         return image_features
