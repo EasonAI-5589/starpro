@@ -324,6 +324,10 @@ class STARVLMModel(LlamaModel):
 
             # Apply text-guided pruning at scheduled layers
             if seq_length > 1 and self.prefill_done and layer_idx in self.pruning_layers:
+                # Fix: Ensure visual_token_indices is on the same device as current layer for accelerate compatibility
+                if self.visual_token_indices.device != hidden_states.device:
+                    self.visual_token_indices = self.visual_token_indices.to(hidden_states.device)
+
                 target_visual_length = self.pruning_layers[layer_idx]
 
                 if self.current_visual_length > target_visual_length:
@@ -398,6 +402,8 @@ class STARVLMModel(LlamaModel):
                         # Get attention from text raters to visual region
                         # Offset text_rater_indices to account for visual tokens
                         text_rater_positions = text_rater_indices + visual_end
+                        # Fix: Ensure text_rater_positions is on the same device as attn_avg for accelerate compatibility
+                        text_rater_positions = text_rater_positions.to(attn_avg.device)
                         rater_to_visual_attn = attn_avg[0, text_rater_positions, visual_start:visual_end]  # (N_raters, N_vis)
 
                         # Aggregate: mean across text raters
@@ -422,6 +428,8 @@ class STARVLMModel(LlamaModel):
                     print(f"[{mode_name}] Selected {len(keep_indices)} tokens using text-to-visual attention")
 
                     # Update indices and hidden states
+                    # Fix: Ensure keep_indices is on the same device as visual_token_indices for accelerate compatibility
+                    keep_indices = keep_indices.to(self.visual_token_indices.device)
                     self.visual_token_indices = self.visual_token_indices[keep_indices]
 
                     visual_hidden = hidden_states[:, visual_start:visual_end]
