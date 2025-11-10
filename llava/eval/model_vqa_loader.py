@@ -100,7 +100,7 @@ def eval_model(args):
         "num_latent": args.num_latent,  # Number of latent tokens (default: 20)
         "latent_pool_size": (args.latent_pool_h, args.latent_pool_w),  # Grid size (default: 5x4)
         "mode": "star_v3" if args.pruning_method == "star_v3" else ("star_v2" if args.pruning_method == "star_v2" else "star"),  # STAR-V3/V2/V1
-        "debug":True,
+        "debug": False,  # Set to True for debugging, False for performance testing
     }
     
     use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method or args.pruning_method == "star_v3" else False
