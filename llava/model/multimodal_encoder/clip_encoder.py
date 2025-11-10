@@ -119,9 +119,11 @@ class CLIPVisionTower(nn.Module):
                     text_inputs = self.text_tokenizer(text=texts, return_tensors="pt")
                     text_segment = (text_inputs.input_ids.shape[1] - 1) // self.max_position_embeddings + 1
                     text_padding = self.max_position_embeddings * text_segment - text_inputs.input_ids.shape[1]
+                    # Get the device of text_tower (may differ from vision tower when using accelerate)
+                    text_tower_device = next(self.text_tower.parameters()).device
                     text_inputs = {
-                        k: torch.cat([v, v.new_zeros((v.shape[0], text_padding))], 
-                                     dim=1).reshape(-1, self.max_position_embeddings).to(device=self.device)
+                        k: torch.cat([v, v.new_zeros((v.shape[0], text_padding))],
+                                     dim=1).reshape(-1, self.max_position_embeddings).to(device=text_tower_device)
                         for k, v in text_inputs.items()
                     }
                     text_embeds = self.text_tower(**text_inputs).text_embeds
