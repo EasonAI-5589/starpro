@@ -1,7 +1,19 @@
+"""
+Lightweight Performance Testing Script (Accelerate Version)
+
+This is a streamlined version of model_vqa_loader.py optimized for quick performance testing.
+- File I/O is disabled for faster execution
+- Limited to 1000 samples (50 warmup + 1000 measurement)
+- Focus on latency and GPU memory measurements
+
+For comprehensive benchmarking with all metrics, use benchmark_performance.py instead.
+"""
+
 import argparse
 import torch
 import os
 import json
+import time
 from tqdm import tqdm
 import shortuuid
 
@@ -102,11 +114,14 @@ def eval_model(args):
     # Data
     questions = [json.loads(q) for q in open(os.path.expanduser(args.question_file), "r")]
     questions = get_chunk(questions, args.num_chunks, args.chunk_idx)
-    answers_file = os.path.expanduser(args.answers_file)
 
-    # 如果测量latency等加速指标把下面,两行注释掉
-    # os.makedirs(os.path.dirname(answers_file), exist_ok=True)
-    # ans_file = open(answers_file, "w")
+    print(f"\n{'='*70}")
+    print(f"Quick Performance Test Mode")
+    print(f"{'='*70}")
+    print(f"Warmup samples: 50")
+    print(f"Measurement samples: 1000")
+    print(f"File I/O: Disabled")
+    print(f"{'='*70}\n")
 
     if 'plain' in model_name and 'finetune' not in model_name.lower() and 'mmtag' not in args.conv_mode:
         args.conv_mode = args.conv_mode + '_mmtag'
@@ -114,7 +129,12 @@ def eval_model(args):
 
     data_loader = create_data_loader(questions, args.image_folder, tokenizer, image_processor, model.config)
 
-    data_bar = tqdm(zip(data_loader, questions), total=len(questions))
+    # Performance tracking
+    total_tokens_generated = 0
+    total_end_to_end_time = 0.0
+    performance_samples = 0
+
+    data_bar = tqdm(zip(data_loader, questions), total=len(questions), desc="Performance Testing")
     data_num = 0
     for (input_ids, image_tensors, image_sizes), line in data_bar:
         idx = line["question_id"]
@@ -130,9 +150,17 @@ def eval_model(args):
         with torch.inference_mode():
             if data_num == 50:
                 model.start_latency = True
+                model.track_flops = True
+                torch.cuda.reset_peak_memory_stats()
+                print("\n[Warmup complete] Starting performance measurement...\n")
             elif data_num == 1050:
                 model.start_latency = False
+                model.track_flops = False
                 break
+
+            # Measure end-to-end time
+            start_time = time.time()
+
             output_ids, visual_token_num = model.generate(
                 input_ids,
                 images=image_tensors,
@@ -144,28 +172,75 @@ def eval_model(args):
                 num_beams=args.num_beams,
                 max_new_tokens=args.max_new_tokens,
                 use_cache=True)
+
+            end_time = time.time()
+            end_to_end_time = end_time - start_time
+
             if hasattr(model.model, 'visual_token_num'):
                 visual_token_num = model.model.visual_token_num
+
+            # Track performance metrics after warmup
+            if data_num >= 50:
+                num_tokens = output_ids.shape[1]
+                total_tokens_generated += num_tokens
+                total_end_to_end_time += end_to_end_time
+                performance_samples += 1
+
             gpu_memory_usage = torch.cuda.memory_allocated() / 1024**3
-            data_bar.set_postfix(vtn=f"{visual_token_num}", gpu=f"{gpu_memory_usage:.2f} GB")
+
+            # Calculate throughput for progress bar
+            if performance_samples > 0 and total_end_to_end_time > 0:
+                img_per_sec = performance_samples / total_end_to_end_time
+                data_bar.set_postfix(
+                    vtn=visual_token_num,
+                    gpu=f"{gpu_memory_usage:.2f}GB",
+                    img_s=f"{img_per_sec:.2f}"
+                )
+            else:
+                data_bar.set_postfix(vtn=visual_token_num, gpu=f"{gpu_memory_usage:.2f}GB")
+
             data_num += 1
 
-        outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
-
-        ans_id = shortuuid.uuid()
-    #     ans_file.write(json.dumps({"question_id": idx,
-    #                                "prompt": cur_prompt,
-    #                                "text": outputs,
-    #                                "answer_id": ans_id,
-    #                                "model_id": model_name,
-    #                                "metadata": {}}) + "\n")
-    #     ans_file.flush()
-    # ans_file.close()
+    # Performance metrics summary
+    print(f"\n{'='*70}")
+    print(f"Performance Test Results")
+    print(f"{'='*70}")
 
     # Latency
-    print(f"Prefill latency: {model.prefill_latency / 1000:.2f} ms")
-    print(f"Decode latency: {model.decode_latency / 1000:.2f} ms")
-    print(f"GPU memory usage: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
+    print(f"\n[Latency Metrics]")
+    if performance_samples > 0:
+        avg_prefill = model.prefill_latency / performance_samples / 1000
+        avg_decode = model.decode_latency / performance_samples / 1000
+        avg_total = avg_prefill + avg_decode
+        print(f"  Prefill latency (avg): {avg_prefill:.2f} ms")
+        print(f"  Decode latency (avg): {avg_decode:.2f} ms")
+        print(f"  Total latency (avg): {avg_total:.2f} ms")
+        print(f"  End-to-end time (avg): {(total_end_to_end_time / performance_samples) * 1000:.2f} ms")
+
+    # GPU Memory
+    print(f"\n[GPU Memory]")
+    print(f"  Peak usage: {torch.cuda.max_memory_allocated() / 1024**3:.2f} GB")
+
+    # FLOPs
+    print(f"\n[FLOPs]")
+    if model.flops_count > 0:
+        avg_flops = model.total_flops / model.flops_count
+        print(f"  Average per sample: {avg_flops:.2f} TFLOPs")
+        if hasattr(model, 'layer_visual_tokens') and model.layer_visual_tokens:
+            print(f"  Layer visual tokens: {model.layer_visual_tokens}")
+
+    # Throughput
+    print(f"\n[Throughput]")
+    if performance_samples > 0 and total_end_to_end_time > 0:
+        tokens_per_sec = total_tokens_generated / total_end_to_end_time
+        images_per_sec = performance_samples / total_end_to_end_time
+        sec_per_image = total_end_to_end_time / performance_samples
+        print(f"  Tokens/second: {tokens_per_sec:.2f}")
+        print(f"  Images/second: {images_per_sec:.2f}")
+        print(f"  Seconds/image: {sec_per_image:.2f}")
+        print(f"  Total samples measured: {performance_samples}")
+
+    print(f"\n{'='*70}")
 
 
 if __name__ == "__main__":

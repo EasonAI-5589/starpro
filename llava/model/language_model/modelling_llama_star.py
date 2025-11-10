@@ -155,6 +155,7 @@ class STARVLMModel(LlamaModel):
         self.visual_token_indices = None
         self.prefill_done = False
         self.visual_token_num = 0
+        self.layer_visual_tokens = []  # Track visual tokens per layer for FLOPS calculation
 
     def forward(
         self,
@@ -305,6 +306,10 @@ class STARVLMModel(LlamaModel):
         next_decoder_cache = None
         visual_token_sum = 0
 
+        # Reset layer visual tokens tracking for each forward pass during prefill
+        if seq_length > 1 and not self.prefill_done:
+            self.layer_visual_tokens = []
+
         for decoder_layer in self.layers:
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
@@ -314,6 +319,8 @@ class STARVLMModel(LlamaModel):
             # Track visual token count for each layer (following PDrop/SparseVLM approach)
             if seq_length > 1 and self.prefill_done:
                 visual_token_sum += self.current_visual_length
+                # Record token count for this layer for FLOPS calculation
+                self.layer_visual_tokens.append(self.current_visual_length)
 
             # Apply text-guided pruning at scheduled layers
             if seq_length > 1 and self.prefill_done and layer_idx in self.pruning_layers:

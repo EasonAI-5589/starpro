@@ -106,6 +106,12 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         self.prefill_latency = 0.0
         self.decode_latency = 0.0
 
+        # FLOPS tracking
+        self.track_flops = False
+        self.layer_visual_tokens = []  # Record visual tokens per layer
+        self.total_flops = 0.0  # Total FLOPs in TFLOPs
+        self.flops_count = 0  # Number of samples for averaging
+
         # Initialize weights and apply final processing
         self.post_init()
     
@@ -117,6 +123,47 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
 
     def get_model(self):
         return self.model
+
+    def calculate_flops(self):
+        """
+        Calculate FLOPs based on recorded visual token numbers per layer.
+
+        Formula per layer (from cal_flops.py):
+        FLOPs = 8 * n * d^2 + 4 * n^2 * d + 6 * n * d * m
+        where:
+        - n: number of visual tokens in this layer
+        - d: hidden dimension (config.hidden_size)
+        - m: FFN intermediate dimension (config.intermediate_size)
+
+        Returns:
+            float: Total FLOPs in TFLOPs (10^12 FLOPs)
+        """
+        if not self.layer_visual_tokens:
+            return 0.0
+
+        d = self.config.hidden_size
+        m = self.config.intermediate_size
+
+        flops = 0.0
+        for n in self.layer_visual_tokens:
+            flops += (8 * n * d * d + 4 * n * n * d + 6 * n * d * m)
+
+        # Convert to TFLOPs
+        flops_tflops = flops / 1e12
+        return flops_tflops
+
+    def record_layer_tokens(self, layer_tokens):
+        """
+        Record visual token numbers for each layer.
+
+        Args:
+            layer_tokens: List of token numbers per layer
+        """
+        self.layer_visual_tokens = layer_tokens
+        if self.track_flops:
+            flops = self.calculate_flops()
+            self.total_flops += flops
+            self.flops_count += 1
 
     def forward(
         self,
@@ -222,12 +269,18 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             inputs_embeds = self.get_model().embed_tokens(inputs)
             visual_token_num = 0
 
-        return super().generate(
+        output = super().generate(
             position_ids=position_ids,
             attention_mask=attention_mask,
             inputs_embeds=inputs_embeds,
             **kwargs
-        ), visual_token_num
+        )
+
+        # Record layer visual tokens for FLOPS calculation (for STAR models)
+        if hasattr(self.model, 'layer_visual_tokens') and self.model.layer_visual_tokens:
+            self.record_layer_tokens(self.model.layer_visual_tokens)
+
+        return output, visual_token_num
 
     def prepare_inputs_for_generation(self, input_ids, past_key_values=None,
                                       inputs_embeds=None, **kwargs):
