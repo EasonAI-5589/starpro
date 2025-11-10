@@ -1064,17 +1064,17 @@ class LlavaMetaForCausalLM(ABC):
             all_masks = []
             
             for b in range(B):
-                image_emb_b = image_embeds[b]  # (N, C)
+                image_emb_b = image_embeds[b].to(device)  # (N, C) - ensure on correct device
                 image_emb_b_norm = image_emb_b / (image_emb_b.norm(dim=-1, keepdim=True) + 1e-8)
-                
+
                 # 计算文本-视觉响应矩阵
-                response_matrix = torch.matmul(image_emb_b_norm, text_normalized.t())  # (N, M)
-                
+                response_matrix = torch.matmul(image_emb_b_norm, text_normalized.to(device).t())  # (N, M)
+
                 selected_indices = []
                 available_mask = torch.ones(N, dtype=torch.bool, device=device)
-                
+
                 # 预计算视觉相似度矩阵
-                visual_feat_b = image_features[b]  # (N, D)
+                visual_feat_b = image_features[b].to(device)  # (N, D) - ensure on correct device
                 visual_feat_b_norm = visual_feat_b / (visual_feat_b.norm(dim=-1, keepdim=True) + 1e-8)
                 visual_similarity = torch.matmul(visual_feat_b_norm, visual_feat_b_norm.t())  # (N, N)
                 
@@ -1269,17 +1269,17 @@ class LlavaMetaForCausalLM(ABC):
             all_masks = []
 
             for b in range(B):
-                image_emb_b = image_embeds[b]  # (N, C)
+                image_emb_b = image_embeds[b].to(device)  # (N, C) - ensure on correct device
                 image_emb_b_norm = image_emb_b / (image_emb_b.norm(dim=-1, keepdim=True) + 1e-8)
 
                 # 计算文本-视觉响应矩阵
-                response_matrix = torch.matmul(image_emb_b_norm, text_normalized.t())  # (N, M)
+                response_matrix = torch.matmul(image_emb_b_norm, text_normalized.to(device).t())  # (N, M)
 
                 selected_indices = []
                 available_mask = torch.ones(N, dtype=torch.bool, device=device)
 
                 # 预计算视觉相似度矩阵
-                visual_feat_b = image_features[b]  # (N, D)
+                visual_feat_b = image_features[b].to(device)  # (N, D) - ensure on correct device
                 visual_feat_b_norm = visual_feat_b / (visual_feat_b.norm(dim=-1, keepdim=True) + 1e-8)
                 visual_similarity = torch.matmul(visual_feat_b_norm, visual_feat_b_norm.t())  # (N, N)
 
