@@ -1366,6 +1366,41 @@ class LlavaMetaForCausalLM(ABC):
             print(f"  ✓ Ready for Stage 2 progressive pruning in modeling_llama_star")
             print(f"{'='*80}\n")
 
+        elif self.pruning_method == 'star_v5':
+            # STAR-V5: S2 Only Ablation (Skip Stage 1 THCP, Progressive Pruning Only)
+            # Stage 1 (here): SKIP THCP, keep all 576 (or 2880) tokens
+            # Stage 2 (in modeling_llama_star): Progressive pruning 576 → target
+            # Purpose: Isolate Stage 2 contribution for ablation study
+
+            print(f"\n{'='*80}")
+            print(f"STAR-V5 Stage 1: SKIPPED (Ablation - S2 Only)")
+            print(f"{'='*80}")
+
+            # Get vision features (without THCP processing)
+            image_features = self.get_model().get_vision_tower()(images)
+
+            B, N, C = image_features.shape
+            device = image_features.device
+
+            print(f"[Stage 1 Config - S2 Only Ablation]")
+            print(f"  Mode: STAR-V5 (S2 Only)")
+            print(f"  Stage 1: SKIPPED (no THCP)")
+            print(f"  Keeping ALL {N} tokens per batch")
+            print(f"  Final target (in Stage 2): {self.visual_token_num}")
+            print(f"  Purpose: Isolate Stage 2 progressive pruning contribution")
+
+            # Create index_masks that selects ALL tokens (no pruning in Stage 1)
+            index_masks = torch.ones(B, N, dtype=torch.bool, device=device)
+
+            print(f"\n[Stage 1 Output - All Tokens Kept]")
+            print(f"  index_masks shape: {index_masks.shape}  # (B, N)")
+            print(f"  Selected tokens per batch: {index_masks.sum(dim=1).tolist()}  # All {N} tokens")
+            print(f"  image_features shape: {image_features.shape}  # (B, N, D)")
+            print(f"  ✓ Stage 1 skipped (S2 Only ablation)")
+            print(f"  ✓ Ready for mm_projector")
+            print(f"  ✓ Ready for Stage 2 progressive pruning in modeling_llama_star")
+            print(f"{'='*80}\n")
+
         elif self.pruning_method == 'star_v2':
             # Two-Stage Pruning Framework
             # Stage 1 (here in llava_arch): Visual diversity-aware pruning - keep 50% tokens

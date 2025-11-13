@@ -76,6 +76,56 @@ STAR_V3_SCHEDULE = {
     }
 }
 
+# STAR-V5 Schedule (S2 Only - Progressive Pruning Only)
+# Stage 1 (llava_arch): Skip THCP, keep all 576 tokens
+# Stage 2 (here): 576 -> target (text-guided progressive pruning)
+# Goal: Isolate Stage 2 contribution for ablation study
+# Note: For anyres mode, initial tokens = 2880, target is automatically multiplied by 5 in __init__
+STAR_V5_SCHEDULE = {
+    "7b": {
+        # Pad mode targets (user passes T, actual target = T)
+        # Initial: 576 tokens (no Stage 1 THCP)
+        192: [(2, 384), (10, 192), (22, 96)],      # Initial: 576 → Avg = 192.0
+        # Verify: (576*2 + 384*8 + 192*12 + 96*10) / 32 = (1152 + 3072 + 2304 + 960) / 32 = 192.0 ✓
+        128: [(3, 192), (11, 64), (23, 32)],       # Initial: 576 → Avg = 128.0
+        # Verify: (576*3 + 192*8 + 64*12 + 32*9) / 32 = (1728 + 1536 + 768 + 288) / 32 = 128.0 ✓
+        64: [(2, 128), (10, 32), (22, 16)],        # Initial: 576 → Avg = 64.0
+        # Verify: (576*2 + 128*8 + 32*12 + 16*10) / 32 = (1152 + 1024 + 384 + 160) / 32 = 64.0 ✓
+        32: [(2, 64), (10, 16), (22, 8)],          # Initial: 576 → Avg = 32.0
+        # Verify: (576*2 + 64*8 + 16*12 + 8*10) / 32 = (1152 + 512 + 192 + 80) / 32 = 32.0 ✓
+
+        # Anyres mode targets (user passes T, actual target = T*5)
+        # Initial: 2880 tokens (no Stage 1 THCP)
+        960: [(2, 1920), (10, 960), (22, 480)],    # Initial: 2880 → Avg = 960.0 (user T=192)
+        # Verify: (2880*2 + 1920*8 + 960*12 + 480*10) / 32 = 960.0 ✓
+        640: [(3, 960), (11, 320), (23, 160)],     # Initial: 2880 → Avg = 640.0 (user T=128)
+        # Verify: (2880*3 + 960*8 + 320*12 + 160*9) / 32 = 640.0 ✓
+        320: [(2, 640), (10, 160), (22, 80)],      # Initial: 2880 → Avg = 320.0 (user T=64)
+        # Verify: (2880*2 + 640*8 + 160*12 + 80*10) / 32 = 320.0 ✓
+        160: [(2, 320), (10, 80), (22, 40)],       # Initial: 2880 → Avg = 160.0 (user T=32)
+        # Verify: (2880*2 + 320*8 + 80*12 + 40*10) / 32 = 160.0 ✓
+    },
+    "13b": {
+        # Pad mode targets (40 layers for 13B model)
+        # Initial: 576 tokens (no Stage 1 THCP)
+        192: [(3, 384), (15, 128), (30, 64)],      # Initial: 576 → Avg = 192.0
+        # Verify: (576*3 + 384*12 + 128*15 + 64*10) / 40 = 192.0 ✓
+        128: [(3, 256), (15, 64), (30, 32)],       # Initial: 576 → Avg = 128.0
+        # Verify: (576*3 + 256*12 + 64*15 + 32*10) / 40 = 128.0 ✓
+        64: [(3, 128), (15, 32), (30, 16)],        # Initial: 576 → Avg = 64.0
+        # Verify: (576*3 + 128*12 + 32*15 + 16*10) / 40 = 64.0 ✓
+        32: [(3, 64), (15, 16), (30, 8)],          # Initial: 576 → Avg = 32.0
+        # Verify: (576*3 + 64*12 + 16*15 + 8*10) / 40 = 32.0 ✓
+
+        # Anyres mode targets (user passes T, actual target = T*5)
+        # Initial: 2880 tokens (no Stage 1 THCP)
+        960: [(3, 1920), (15, 640), (30, 320)],    # Initial: 2880 → Avg = 960.0 (user T=192)
+        640: [(3, 1280), (15, 320), (30, 160)],    # Initial: 2880 → Avg = 640.0 (user T=128)
+        320: [(3, 640), (15, 160), (30, 80)],      # Initial: 2880 → Avg = 320.0 (user T=64)
+        160: [(3, 320), (15, 80), (30, 40)],       # Initial: 2880 → Avg = 160.0 (user T=32)
+    }
+}
+
 class STARVLMModel(LlamaModel):
     """
     STAR-VLM: Multi-Layer Progressive Pruning with Attention-based Importance Scoring
@@ -128,6 +178,23 @@ class STARVLMModel(LlamaModel):
             print(f"  Expected input from Stage 1: {self.visual_token_length} tokens (T × 2)")
             print(f"  Stage 1 method: THCP (adaptive to target)")
             print(f"  Target tokens: {self.target_visual_tokens}")
+        elif self.mode == "star_v5":
+            # STAR-V5: S2 Only ablation (Stage 1 skipped, progressive pruning only)
+            # Stage 1 (llava_arch) skips THCP and keeps all 576 (or 2880) tokens
+            # Stage 2 (here) progressively prunes from 576 -> target
+            # Keep visual_token_length at full size (576 or 2880)
+            # visual_token_length is already set above based on aspect_ratio
+            self.pruning_schedule = STAR_V5_SCHEDULE[self.scale][self.target_visual_tokens]
+            print(f"\n{'='*80}")
+            print(f"[STAR-V5 Stage 2 Only] Initialized (Ablation: S2 Only)")
+            print(f"  Scale: {self.scale} ({config.num_hidden_layers} layers)")
+            print(f"  Aspect ratio: {'anyres' if self.anyres else 'pad'}")
+            print(f"  User passed T: {starvlm_config['T']}")
+            print(f"  Expected input from Stage 1: {self.visual_token_length} tokens (all tokens, no THCP)")
+            print(f"  Stage 1: SKIPPED (no THCP)")
+            print(f"  Stage 2: Progressive pruning {self.visual_token_length} → {self.target_visual_tokens}")
+            print(f"  Pruning schedule: {self.pruning_schedule}")
+            print(f"{'='*80}\n")
         elif self.mode == "star_v2":
             # STAR-V2: Two-stage mode (Stage 1 gives 288 tokens, fixed 50%)
             self.visual_token_length = self.visual_token_length // 2
