@@ -379,6 +379,10 @@ class STARVLMModel(LlamaModel):
         if seq_length > 1 and not self.prefill_done:
             self.layer_visual_tokens = []
 
+        # DEBUG: Print forward pass info
+        if self.mode == "star_v5":
+            print(f"\n[STAR-V5 DEBUG] Forward pass: seq_length={seq_length}, prefill_done={self.prefill_done}, past_kv={'None' if past_key_values is None else 'exists'}")
+
         for decoder_layer in self.layers:
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
@@ -392,6 +396,10 @@ class STARVLMModel(LlamaModel):
                 self.layer_visual_tokens.append(self.current_visual_length)
 
             # Apply text-guided pruning at scheduled layers
+            # DEBUG: Check pruning conditions for STAR-V5
+            if self.mode == "star_v5" and layer_idx in [1, 3, 11, 23]:
+                print(f"[STAR-V5 DEBUG] Layer {layer_idx}: seq_len={seq_length}, prefill_done={self.prefill_done}, in_schedule={layer_idx in self.pruning_layers}")
+
             if seq_length > 1 and self.prefill_done and layer_idx in self.pruning_layers:
                 # Fix: Ensure visual_token_indices is on the same device as current layer for accelerate compatibility
                 if self.visual_token_indices.device != hidden_states.device:
