@@ -363,9 +363,11 @@ class STARVLMModel(LlamaModel):
                 mode_name = "STAR-V3 Stage 2"
             elif self.mode == "star_v2":
                 mode_name = "STAR-V2 Stage 2"
+            elif self.mode == "star_v5":
+                mode_name = "STAR-V5 Stage 2"
             else:
                 mode_name = "STAR-FastV"
-            print(f"[{mode_name}] Prefill: visual tokens = {self.current_visual_length}")
+            print(f"[{mode_name}] Prefill: visual tokens = {self.current_visual_length}, target = {self.target_visual_tokens}")
 
         # Process layers with progressive pruning
         all_hidden_states = () if output_hidden_states else None
@@ -405,6 +407,8 @@ class STARVLMModel(LlamaModel):
                         mode_name = "STAR-V3 Stage 2"
                     elif self.mode == "star_v2":
                         mode_name = "STAR-V2 Stage 2"
+                    elif self.mode == "star_v5":
+                        mode_name = "STAR-V5 Stage 2"
                     else:
                         mode_name = "STAR-FastV"
                     print(f"\n[{mode_name}] Layer {layer_idx}: Pruning {self.current_visual_length} → {target_visual_length}")
@@ -532,6 +536,7 @@ class STARVLMModel(LlamaModel):
                         ], dim=2)
 
                     self.current_visual_length = target_visual_length
+                    print(f"[{mode_name}] Layer {layer_idx}: ✓ Pruning complete. Current tokens: {self.current_visual_length}")
 
                     if use_cache:
                         next_decoder_cache = layer_outputs[2 if output_attentions else 1]
