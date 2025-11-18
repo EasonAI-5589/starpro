@@ -1247,10 +1247,17 @@ class LlavaMetaForCausalLM(ABC):
             is_anyres_multi_patch = (B > 1 and
                                      getattr(self.config, 'image_aspect_ratio', 'square') == 'anyres')
 
-            # ========== 超参数配置（与THCP一致） ==========
-            coverage_weight = 0.7  # M>1时的覆盖权重
-            relevance_weight = 0.5  # M=1时的相关性权重
-            diversity_weight = 0.5  # 多样性权重
+            # ========== 超参数配置（与THCP一致，使用Lambda） ==========
+            # Stage 1 (THCP) Lambda Ablation Support
+            # Formula: L_i(S) = (1-λ)R_i + λD_i(S)
+            # λ=0.0: pure relevance, λ=1.0: pure diversity, λ=0.5: balanced
+            import os
+            lambda_val = float(os.environ.get('LAMBDA', '0.5'))
+
+            # Unified weights using (1-λ)R + λD formula
+            coverage_weight = 1.0 - lambda_val   # (1-λ) for coverage in M>1 mode
+            relevance_weight = 1.0 - lambda_val  # (1-λ) for relevance in M=1 mode
+            diversity_weight = lambda_val        # λ for diversity in both modes
 
             M = text_embeds.shape[0]
             text_normalized = text_embeds / (text_embeds.norm(dim=-1, keepdim=True) + 1e-8)
@@ -1268,7 +1275,13 @@ class LlavaMetaForCausalLM(ABC):
             else:
                 tokens_per_patch = stage1_keep_num
 
-            print(f"[Stage 1 Config - Adaptive to Target]")
+            print(f"\n[Lambda Configuration]")
+            print(f"  λ (lambda): {lambda_val}")
+            print(f"  Formula: L_i(S) = (1-λ)R_i + λD_i(S)")
+            print(f"  Relevance weight (1-λ): {relevance_weight}")
+            print(f"  Diversity weight (λ): {diversity_weight}")
+
+            print(f"\n[Stage 1 Config - Adaptive to Target]")
             print(f"  Original tokens per patch: {N}")
             print(f"  Stage 1 keeps per patch: {tokens_per_patch}")
             print(f"  Final target: {self.visual_token_num}")
