@@ -32,6 +32,10 @@ for lambda in "${LAMBDA_VALUES[@]}"; do
         echo ">>> Running: $task with $METHOD (lambda=$lambda, budget=$TOKEN_BUDGET)"
         CUDA_VISIBLE_DEVICES=$GPUS bash scripts/$MODEL_VERSION/$MODEL_SCALE/$task.sh $METHOD $TOKEN_BUDGET
     done
+
+    echo ""
+    echo ">>> ✓ Finished Lambda=$lambda (Relevance=$relevance, Diversity=$lambda)"
+    echo ""
 done
 
 echo "=========================================="
