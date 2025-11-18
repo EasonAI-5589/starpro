@@ -7,7 +7,7 @@
 
 set -e
 
-METHOD="thcp"
+METHOD="star_v3"
 TOKEN=128
 LAMBDA=0.5
 

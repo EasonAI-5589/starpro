@@ -14,7 +14,7 @@
 #   λ=1.0  → Pure diversity (0.0R + 1.0D)
 #
 # Configuration:
-#   Method: thcp (Stage 1 only)
+#   Method: star_v3 (S1+S2 Full STAR-Pro)
 #   Token budget: T=128
 #   Benchmark: POPE (fast validation)
 #   Model: llava-v1.6-vicuna-7b
@@ -23,7 +23,7 @@
 
 set -e  # Exit on error
 
-METHOD="thcp"
+METHOD="star_v3"
 TOKEN=128
 
 echo "================================================================================"

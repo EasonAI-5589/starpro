@@ -81,12 +81,12 @@ bash scripts/ablations/stage1_lambda_ablation.sh
 For individual λ values:
 ```bash
 export LAMBDA=0.5
-bash scripts/v1_6/7b/pope.sh thcp 128
+bash scripts/v1_6/7b/pope.sh star_v3 128
 ```
 
 ## Configuration
 
-- **Method:** `thcp` (Stage 1 only, no Stage 2 pruning)
+- **Method:** `star_v3` (S1+S2 Full STAR-Pro pipeline)
 - **Token Budget:** T=128 (target average visual tokens)
 - **Benchmark:** POPE (Polling-based Object Probing Evaluation)
 - **Model:** llava-v1.6-vicuna-7b
