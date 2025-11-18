@@ -29,9 +29,9 @@ echo ""
 # Export lambda
 export LAMBDA=${LAMBDA}
 
-# Run POPE benchmark
-echo "Running POPE benchmark..."
-bash scripts/v1_6/7b/pope.sh ${METHOD} ${TOKEN}
+# Run MME benchmark
+echo "Running MME benchmark..."
+bash scripts/v1_6/7b/mme.sh ${METHOD} ${TOKEN}
 
 echo ""
 echo "================================================================================"
@@ -43,5 +43,5 @@ echo "  - λ (lambda): 0.5"
 echo "  - Relevance weight (1-λ): 0.5"
 echo "  - Diversity weight (λ): 0.5"
 echo ""
-echo "Result log: ./results/pope_llava-v1.6-vicuna-7b_thcp_vtn128.log"
+echo "Result log: ./results/mme_llava-v1.6-vicuna-7b_star_v3_vtn128.log"
 echo ""

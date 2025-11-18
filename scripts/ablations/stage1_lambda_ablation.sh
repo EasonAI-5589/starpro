@@ -53,7 +53,7 @@ echo "Master log: ${MASTER_LOG}"
 echo ""
 
 # Lambda values to test
-LAMBDA_VALUES=(0.0 0.25 0.5 0.75 1.0)
+LAMBDA_VALUES=(0.5)
 
 for lambda in "${LAMBDA_VALUES[@]}"; do
     echo "================================================================================"
@@ -67,23 +67,23 @@ for lambda in "${LAMBDA_VALUES[@]}"; do
     # Export lambda for this run
     export LAMBDA=${lambda}
 
-    # Run POPE benchmark
-    echo "  Running POPE benchmark..."
-    bash scripts/v1_6/7b/pope.sh ${METHOD} ${TOKEN}
+    # Run MME benchmark
+    echo "  Running MME benchmark..."
+    bash scripts/v1_6/7b/mme.sh ${METHOD} ${TOKEN}
 
     # Copy result log to ablation directory
-    POPE_LOG="./results/pope_llava-v1.6-vicuna-7b_${METHOD}_vtn${TOKEN}.log"
-    if [ -f "${POPE_LOG}" ]; then
-        LAMBDA_LOG="${RESULT_DIR}/lambda_${lambda}_pope.log"
-        cp ${POPE_LOG} ${LAMBDA_LOG}
+    MME_LOG="./results/mme_llava-v1.6-vicuna-7b_${METHOD}_vtn${TOKEN}.log"
+    if [ -f "${MME_LOG}" ]; then
+        LAMBDA_LOG="${RESULT_DIR}/lambda_${lambda}_mme.log"
+        cp ${MME_LOG} ${LAMBDA_LOG}
         echo "  Result saved to: ${LAMBDA_LOG}"
 
-        # Extract F1 score and append to master log
-        F1_SCORE=$(grep "Average F1" ${POPE_LOG} | tail -1)
-        echo "LAMBDA=${lambda}: ${F1_SCORE}" >> ${MASTER_LOG}
-        echo "  ${F1_SCORE}"
+        # Extract total score and append to master log
+        TOTAL_SCORE=$(grep "Total Score:" ${MME_LOG} | tail -1)
+        echo "LAMBDA=${lambda}: ${TOTAL_SCORE}" >> ${MASTER_LOG}
+        echo "  ${TOTAL_SCORE}"
     else
-        echo "  Warning: Result log not found at ${POPE_LOG}"
+        echo "  Warning: Result log not found at ${MME_LOG}"
     fi
 
     echo ""
