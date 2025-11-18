@@ -142,8 +142,6 @@ class LlavaMetaForCausalLM(ABC):
         if 'prumerge' in self.pruning_method or self.pruning_method == 'visionzip' or self.pruning_method == 'fastervlm':
             image_features, image_attentions, image_keys, image_cls = self.get_model().get_vision_tower()(images, output_attentions=True)
         elif self.pruning_method == 'trim' or self.pruning_method == 'cdp3' or 'thcp' in self.pruning_method or self.pruning_method == 'star_v3':
-            # 🔥 添加这行调试
-            print(f"Pruning method: {self.pruning_method}, texts is None: {texts is None}, texts value: {texts}")
             image_features, image_embeds, text_embeds = self.get_model().get_vision_tower()(images, texts=texts)
         else:
             image_features = self.get_model().get_vision_tower()(images)
@@ -356,7 +354,8 @@ class LlavaMetaForCausalLM(ABC):
         
         elif 'cdp3' in self.pruning_method:
             # ========== Debug配置 ==========
-            enable_debug = True
+            import os
+            enable_debug = os.environ.get('ENABLE_DEBUG', '0') == '1'
             debug_info = {
                 'text_stats': [],
                 'relevance_stats': [],
@@ -763,7 +762,8 @@ class LlavaMetaForCausalLM(ABC):
             diversity_weight = 0.3  # 视觉多样性的权重
 
             # ========== Debug配置 ==========
-            enable_debug = True  # 设置为True启用debug
+            import os
+            enable_debug = os.environ.get('ENABLE_DEBUG', '0') == '1'
             debug_info = {
                 'text_importance_stats': [],
                 'coverage_progression': [],
@@ -1042,9 +1042,9 @@ class LlavaMetaForCausalLM(ABC):
             coverage_weight = 1.0 - lambda_val   # (1-λ) for coverage in M>1 mode
             relevance_weight = 1.0 - lambda_val  # (1-λ) for relevance in M=1 mode
             diversity_weight = lambda_val        # λ for diversity in both modes
-            
+
             # ========== Debug配置 ==========
-            enable_debug = True
+            enable_debug = os.environ.get('ENABLE_DEBUG', '0') == '1'
             debug_info = {
                 'mode': None,
                 'text_stats': [],
@@ -1407,9 +1407,13 @@ class LlavaMetaForCausalLM(ABC):
             # Stage 2 (in modeling_llama_star): Progressive pruning 576 → target
             # Purpose: Isolate Stage 2 contribution for ablation study
 
-            print(f"\n{'='*80}")
-            print(f"STAR-V5 Stage 1: SKIPPED (Ablation - S2 Only)")
-            print(f"{'='*80}")
+            import os
+            enable_debug = os.environ.get('ENABLE_DEBUG', '0') == '1'
+
+            if enable_debug:
+                print(f"\n{'='*80}")
+                print(f"STAR-V5 Stage 1: SKIPPED (Ablation - S2 Only)")
+                print(f"{'='*80}")
 
             # Get vision features (without THCP processing)
             image_features = self.get_model().get_vision_tower()(images)
@@ -1417,33 +1421,39 @@ class LlavaMetaForCausalLM(ABC):
             B, N, C = image_features.shape
             device = image_features.device
 
-            print(f"[Stage 1 Config - S2 Only Ablation]")
-            print(f"  Mode: STAR-V5 (S2 Only)")
-            print(f"  Stage 1: SKIPPED (no THCP)")
-            print(f"  Keeping ALL {N} tokens per batch")
-            print(f"  Final target (in Stage 2): {self.visual_token_num}")
-            print(f"  Purpose: Isolate Stage 2 progressive pruning contribution")
+            if enable_debug:
+                print(f"[Stage 1 Config - S2 Only Ablation]")
+                print(f"  Mode: STAR-V5 (S2 Only)")
+                print(f"  Stage 1: SKIPPED (no THCP)")
+                print(f"  Keeping ALL {N} tokens per batch")
+                print(f"  Final target (in Stage 2): {self.visual_token_num}")
+                print(f"  Purpose: Isolate Stage 2 progressive pruning contribution")
 
             # Create index_masks that selects ALL tokens (no pruning in Stage 1)
             index_masks = torch.ones(B, N, dtype=torch.bool, device=device)
 
-            print(f"\n[Stage 1 Output - All Tokens Kept]")
-            print(f"  index_masks shape: {index_masks.shape}  # (B, N)")
-            print(f"  Selected tokens per batch: {index_masks.sum(dim=1).tolist()}  # All {N} tokens")
-            print(f"  image_features shape: {image_features.shape}  # (B, N, D)")
-            print(f"  ✓ Stage 1 skipped (S2 Only ablation)")
-            print(f"  ✓ Ready for mm_projector")
-            print(f"  ✓ Ready for Stage 2 progressive pruning in modeling_llama_star")
-            print(f"{'='*80}\n")
+            if enable_debug:
+                print(f"\n[Stage 1 Output - All Tokens Kept]")
+                print(f"  index_masks shape: {index_masks.shape}  # (B, N)")
+                print(f"  Selected tokens per batch: {index_masks.sum(dim=1).tolist()}  # All {N} tokens")
+                print(f"  image_features shape: {image_features.shape}  # (B, N, D)")
+                print(f"  ✓ Stage 1 skipped (S2 Only ablation)")
+                print(f"  ✓ Ready for mm_projector")
+                print(f"  ✓ Ready for Stage 2 progressive pruning in modeling_llama_star")
+                print(f"{'='*80}\n")
 
         elif self.pruning_method == 'star_v2':
             # Two-Stage Pruning Framework
             # Stage 1 (here in llava_arch): Visual diversity-aware pruning - keep 50% tokens
             # Stage 2 (in modeling_llama_star): Text-guided progressive pruning
 
-            print(f"\n{'='*80}")
-            print(f"STAR-V2 Stage 1: Diversity-Aware Visual Pruning")
-            print(f"{'='*80}")
+            import os
+            enable_debug = os.environ.get('ENABLE_DEBUG', '0') == '1'
+
+            if enable_debug:
+                print(f"\n{'='*80}")
+                print(f"STAR-V2 Stage 1: Diversity-Aware Visual Pruning")
+                print(f"{'='*80}")
 
             # Get visual self-attention
             image_features_attn, image_attentions, image_keys, image_cls = self.get_model().get_vision_tower()(images, output_attentions=True)
@@ -1455,11 +1465,12 @@ class LlavaMetaForCausalLM(ABC):
             # Stage 1: Keep 50% of original tokens using diversity-aware selection
             stage1_keep_num = N // 2  # 576 -> 288, or 2880 -> 1440
 
-            print(f"[Stage 1 Config]")
-            print(f"  Original tokens: {N}")
-            print(f"  Stage 1 keeps: {stage1_keep_num} (50%)")
-            print(f"  Target tokens: {self.visual_token_num}")
-            print(f"  Stage 2 will prune: {stage1_keep_num} -> {self.visual_token_num}")
+            if enable_debug:
+                print(f"[Stage 1 Config]")
+                print(f"  Original tokens: {N}")
+                print(f"  Stage 1 keeps: {stage1_keep_num} (50%)")
+                print(f"  Target tokens: {self.visual_token_num}")
+                print(f"  Stage 2 will prune: {stage1_keep_num} -> {self.visual_token_num}")
 
             # CLS attention as importance score
             cls_attn = image_attentions.mean(dim=1)  # (B, N)
@@ -1468,8 +1479,9 @@ class LlavaMetaForCausalLM(ABC):
             image_normalized = image_features / image_features.norm(dim=-1, keepdim=True)
             similarity_matrix = torch.matmul(image_normalized, image_normalized.transpose(1, 2))  # (B, N, N)
 
-            print(f"\n[Stage 1 Selection: De-redundancy via Self-Similarity]")
-            print(f"  Method: Remove redundant tokens with high self-similarity")
+            if enable_debug:
+                print(f"\n[Stage 1 Selection: De-redundancy via Self-Similarity]")
+                print(f"  Method: Remove redundant tokens with high self-similarity")
 
             # De-redundancy: remove tokens with high similarity to others
             # For each token, find its max similarity to all other tokens
@@ -1491,8 +1503,9 @@ class LlavaMetaForCausalLM(ABC):
             stage1_indices = redundancy_scores.topk(k=stage1_keep_num, dim=1, largest=False).indices
             stage1_indices = stage1_indices.sort(dim=1).values  # Keep spatial order
 
-            print(f"  CLS attention stats: mean={cls_attn.mean():.4f}, std={cls_attn.std():.4f}")
-            print(f"  Selected indices shape: {stage1_indices.shape}")
+            if enable_debug:
+                print(f"  CLS attention stats: mean={cls_attn.mean():.4f}, std={cls_attn.std():.4f}")
+                print(f"  Selected indices shape: {stage1_indices.shape}")
 
             # Check diversity of selected tokens
             selected_features = torch.gather(
@@ -1502,7 +1515,9 @@ class LlavaMetaForCausalLM(ABC):
             )
             selected_sim = torch.matmul(selected_features, selected_features.transpose(1, 2))
             avg_sim = (selected_sim.sum(dim=(1,2)) - stage1_keep_num) / (stage1_keep_num * (stage1_keep_num - 1))
-            print(f"  Avg pairwise similarity of selected: {avg_sim.mean():.4f} (lower is more diverse)")
+
+            if enable_debug:
+                print(f"  Avg pairwise similarity of selected: {avg_sim.mean():.4f} (lower is more diverse)")
 
             # Gather selected features
             stage1_features = torch.gather(
@@ -1518,19 +1533,24 @@ class LlavaMetaForCausalLM(ABC):
             index_masks = torch.ones(B, stage1_keep_num, dtype=torch.bool, device=device)
             merged_features = None
 
-            print(f"\n[Stage 1 Output (before projection)]")
-            print(f"  Output shape: {image_features.shape}")
-            print(f"  Ready for Stage 2 text-guided progressive pruning")
-            print(f"{'='*80}\n")
+            if enable_debug:
+                print(f"\n[Stage 1 Output (before projection)]")
+                print(f"  Output shape: {image_features.shape}")
+                print(f"  Ready for Stage 2 text-guided progressive pruning")
+                print(f"{'='*80}\n")
 
         elif self.pruning_method == 'star_v2_anchor':
             # Two-Stage Pruning Framework with Anchor-based De-redundancy
             # Stage 1: Select anchors (CLS attention) + remove similar neighbors
             # Stage 2: Text-guided progressive pruning
 
-            print(f"\n{'='*80}")
-            print(f"STAR-V2-Anchor Stage 1: Anchor-based De-redundancy")
-            print(f"{'='*80}")
+            import os
+            enable_debug = os.environ.get('ENABLE_DEBUG', '0') == '1'
+
+            if enable_debug:
+                print(f"\n{'='*80}")
+                print(f"STAR-V2-Anchor Stage 1: Anchor-based De-redundancy")
+                print(f"{'='*80}")
 
             # Get visual self-attention
             image_features_attn, image_attentions, image_keys, image_cls = self.get_model().get_vision_tower()(images, output_attentions=True)
@@ -1541,10 +1561,11 @@ class LlavaMetaForCausalLM(ABC):
 
             stage1_keep_num = N // 2  # 576 -> 288
 
-            print(f"[Stage 1 Config]")
-            print(f"  Original tokens: {N}")
-            print(f"  Stage 1 keeps: {stage1_keep_num} (50%)")
-            print(f"  Target tokens: {self.visual_token_num}")
+            if enable_debug:
+                print(f"[Stage 1 Config]")
+                print(f"  Original tokens: {N}")
+                print(f"  Stage 1 keeps: {stage1_keep_num} (50%)")
+                print(f"  Target tokens: {self.visual_token_num}")
 
             # CLS attention as importance score
             cls_attn = image_attentions.mean(dim=1)  # (B, N)
@@ -1553,13 +1574,17 @@ class LlavaMetaForCausalLM(ABC):
             image_normalized = image_features / image_features.norm(dim=-1, keepdim=True)
             similarity_matrix = torch.matmul(image_normalized, image_normalized.transpose(1, 2))  # (B, N, N)
 
-            print(f"\n[Step 1: Select Anchor Tokens]")
+            if enable_debug:
+                print(f"\n[Step 1: Select Anchor Tokens]")
             # Step 1: Select anchor tokens using CLS attention
             num_anchors = stage1_keep_num // 2  # 144 anchors
             anchor_indices = cls_attn.topk(k=num_anchors, dim=1).indices  # (B, num_anchors)
-            print(f"  Anchors: {num_anchors} tokens (top CLS attention)")
 
-            print(f"\n[Step 2: De-redundancy Around Anchors]")
+            if enable_debug:
+                print(f"  Anchors: {num_anchors} tokens (top CLS attention)")
+
+            if enable_debug:
+                print(f"\n[Step 2: De-redundancy Around Anchors]")
             # Step 2: For non-anchor tokens, keep those with LOW similarity to anchors
             all_indices = set(range(N))
             selected_indices = []
@@ -1590,8 +1615,10 @@ class LlavaMetaForCausalLM(ABC):
                 selected_indices.append(sorted(list(selected)))
 
             stage1_indices = torch.tensor(selected_indices, dtype=torch.long, device=device)
-            print(f"  Non-anchors kept: {stage1_keep_num - num_anchors} (low similarity to anchors)")
-            print(f"  Interpretation: Anchors query neighbors, remove redundant")
+
+            if enable_debug:
+                print(f"  Non-anchors kept: {stage1_keep_num - num_anchors} (low similarity to anchors)")
+                print(f"  Interpretation: Anchors query neighbors, remove redundant")
 
             # Gather selected features
             stage1_features = torch.gather(
@@ -1604,10 +1631,11 @@ class LlavaMetaForCausalLM(ABC):
             index_masks = torch.ones(B, stage1_keep_num, dtype=torch.bool, device=device)
             merged_features = None
 
-            print(f"\n[Stage 1 Output (before projection)]")
-            print(f"  Output shape: {image_features.shape}")
-            print(f"  Ready for Stage 2 text-guided progressive pruning")
-            print(f"{'='*80}\n")
+            if enable_debug:
+                print(f"\n[Stage 1 Output (before projection)]")
+                print(f"  Output shape: {image_features.shape}")
+                print(f"  Ready for Stage 2 text-guided progressive pruning")
+                print(f"{'='*80}\n")
 
         # 🔥 STAR-V2/V2-Anchor/V5 need mm_projector (they bypassed line 307)
         if self.pruning_method in ['star_v2', 'star_v2_anchor', 'star_v5']:

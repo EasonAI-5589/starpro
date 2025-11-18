@@ -481,18 +481,18 @@ bash scripts/ablations/run_all_ablations.sh
 
 **Current Progress** (✅ = completed, ⏳ = pending):
 
-| Method                              | Stage 1 | Stage 2 | POPE (F1/Acc)           | MME                | TextVQA           | GQA              | Avg Tokens | FLOPs |
-| ----------------------------------- | ------- | ------- | ----------------------- | ------------------ | ----------------- | ---------------- | ---------- | ----- |
-| THCP (S1 Only)                      | ✓      | ✗      | 98.0⏳ / -              | ⏳                 | ⏳                | ⏳               | 128        | ~1.7T |
-| Progressive (S2 Only) - Uniform     | ✗      | ✓      | 65.7 / 72.7             | 1400.5             | -                 | -                | 128        | 1.68T |
+| Method                              | Stage 1 | Stage 2 | POPE (F1/Acc)           | MME                | TextVQA           | GQA               | Avg Tokens | FLOPs |
+| ----------------------------------- | ------- | ------- | ----------------------- | ------------------ | ----------------- | ----------------- | ---------- | ----- |
+| THCP (S1 Only)                      | ✓      | ✗      | 98.0⏳ / -              | ⏳                 | ⏳                | ⏳                | 128        | ~1.7T |
+| Progressive (S2 Only) - Uniform     | ✗      | ✓      | 65.7 / 72.7             | 1400.5             | -                 | -                 | 128        | 1.68T |
 | Progressive (S2 Only) - Front-Heavy | ✗      | ✓      | **77.7✅** / 80.4 | **1681.6✅** | **52.73✅** | **57.13✅** | 128        | 1.68T |
-| **STAR-Pro (Full)**           | ✓      | ✓      | 98.4⏳ / -              | ⏳                 | ⏳                | ⏳               | 128        | ~1.7T |
+| **STAR-Pro (Full)**           | ✓      | ✓      | 98.4⏳ / -              | ⏳                 | ⏳                | ⏳                | 128        | ~1.7T |
 
 **Completed Results (S2 Only - STAR-V5 with Front-Heavy Schedule)**:
 
 - ✅ **POPE**: F1=77.7% (Acc=80.4%, Prec=91-98%, Rec=65.6%)
 - ✅ **MME**: Total=1681.6 (Perception=1384.4, Cognition=297.1)
-- ✅ **TextVQA**: Acc=52.73%
+- ✅ **TextVQA**: Acc=52.73%7/Users/guoyichen/EasonAI/STAR-LLaVA/scripts/v1_5/7b/mme.sh
 - ✅ **GQA**: Acc=57.13% (Binary=74.31%, Open=42.56%, Object=82.13%)
 
 **Schedule Comparison**:
@@ -562,33 +562,33 @@ bash scripts/ablations/run_all_ablations.sh
 **Major Discovery**: Layer-wise token allocation strategy significantly impacts performance! 🚀
 
 - ✅ **Discovered front-heavy schedule optimization**:
+
   - Schedule: `[(2, 192), (12, 64), (24, 32)]` - Keep more tokens in first 14 layers
   - Strategy: Rich semantics early, aggressive pruning late
   - **Results with front-heavy schedule**:
     - MME: 1681.6 ✨ (+281 vs uniform, +20.1%)
     - POPE: F1=77.7% ✨ (+12.0 pp vs uniform, +18.3%)
     - TextVQA: 52.73%
-
 - ✅ **Completed all S2 Only (STAR-V5) benchmarks**:
+
   - ✅ MME: 1681.6 (Perception=1384.4, Cognition=297.1)
   - ✅ POPE: F1=77.7% (Acc=80.4%, Prec=91-98%, Rec=65.6%)
   - ✅ TextVQA: 52.73%
   - ✅ GQA: 57.13% (Binary=74.31%, Open=42.56%, Object=82.13%)
-
 - ✅ **Schedule evolution documented**:
+
   - Uniform schedule `[(2, 320), (5, 128), (9, 64)]`: F1=65.7%, MME=1400.5 (deprecated)
   - Front-heavy schedule `[(2, 192), (12, 64), (24, 32)]`: F1=77.7%, MME=1681.6 (current)
-
 - 🔍 **Key finding #1**: Front-heavy schedule dramatically improves S2 performance
+
   - Recall boost: 50.3% → 65.6% (+15.3 pp) 🔥
   - Better object coverage with maintained precision (>91%)
   - Early layers need more visual tokens for semantic understanding
-
 - 🔍 **Key finding #2**: S2 contribution reinterpreted
+
   - Standalone (front-heavy): 77.7% F1 (competitive performance)
   - With S1: Adds +0.4 pp refinement on top of S1's 98.0%
   - Shows S2 works well both standalone and with S1
-
 - 📝 Created comprehensive ablation study documentation with schedule comparison
 - 📊 Updated Table 6 with front-heavy schedule results
 
@@ -601,11 +601,11 @@ bash scripts/ablations/run_all_ablations.sh
 
 ### Next Steps
 
-- [x] S2 Only (STAR-V5): All benchmarks ✅ **COMPLETE**
-  - [x] POPE ✅ F1=77.7% (front-heavy)
-  - [x] MME ✅ 1681.6 (front-heavy)
-  - [x] TextVQA ✅ 52.73% (front-heavy)
-  - [x] GQA ✅ 57.13% (front-heavy)
+- [X] S2 Only (STAR-V5): All benchmarks ✅ **COMPLETE**
+  - [X] POPE ✅ F1=77.7% (front-heavy)
+  - [X] MME ✅ 1681.6 (front-heavy)
+  - [X] TextVQA ✅ 52.73% (front-heavy)
+  - [X] GQA ✅ 57.13% (front-heavy)
 - [ ] S1 Only (THCP): Collect/verify existing results for MME, TextVQA
 - [ ] S1+S2 Full: Verify existing results are available
 - [ ] Write ablation analysis section for paper
@@ -614,21 +614,22 @@ bash scripts/ablations/run_all_ablations.sh
 ### Key Insights for Paper
 
 1. **Schedule Design is Critical** 🔥
+
    - Front-heavy allocation: +18-20% improvement over uniform
    - Early layers benefit from richer visual information
    - Enables better semantic understanding and object coverage
-
 2. **S2 Standalone Performance** (with proper scheduling)
+
    - Achieves 77.7% F1 (competitive without S1)
    - Shows progressive pruning is powerful when properly configured
    - Gap vs S1 reduced from 32.3 pp to 20.3 pp
-
 3. **Two-Stage Synergy**
+
    - S1 provides foundation: 98.0% baseline
    - S2 adds refinement: +0.4 pp to 98.4%
    - Both stages contribute meaningfully
-
 4. **Practical Implications**
+
    - For efficiency-critical apps: S2 alone (77.7% F1, 1.68 TFLOPs)
    - For accuracy-critical apps: S1+S2 (98.4% F1, ~1.7 TFLOPs)
    - Schedule tuning can bridge the gap
