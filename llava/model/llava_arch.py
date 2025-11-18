@@ -1240,7 +1240,9 @@ class LlavaMetaForCausalLM(ABC):
             # Stage 2 (in modeling_llama_star): Progressive pruning → target*2 → target
 
             # ========== Debug配置 ==========
-            enable_debug = False
+            # Read from environment variable (set in run_stage1_lambda.sh)
+            import os
+            enable_debug = os.environ.get('ENABLE_DEBUG', '0') == '1'
 
             if enable_debug:
                 print(f"\n{'='*80}")

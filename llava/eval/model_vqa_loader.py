@@ -134,8 +134,11 @@ def eval_model(args):
     total_end_to_end_time = 0.0
     performance_samples = 0
 
-    # Disable progress bar for cleaner logs (set disable=False to show progress)
-    data_bar = tqdm(zip(data_loader, questions), total=len(questions), disable=True)
+    # Progress bar control: reads ENABLE_DEBUG from environment
+    # Set ENABLE_DEBUG=1 to show progress bar, ENABLE_DEBUG=0 (or unset) for clean logs
+    import os
+    show_progress = os.environ.get('ENABLE_DEBUG', '0') == '1'
+    data_bar = tqdm(zip(data_loader, questions), total=len(questions), disable=not show_progress)
     data_num = 0
     for (input_ids, image_tensors, image_sizes), line in data_bar:
         idx = line["question_id"]
