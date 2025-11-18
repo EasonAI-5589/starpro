@@ -20,8 +20,9 @@ GPUS="0,1,2,3,4,5,6,7"
 
 # ==================== Run Evaluations ====================
 for lambda in "${LAMBDA_VALUES[@]}"; do
+    relevance=$(awk "BEGIN {print 1-$lambda}")
     echo "=========================================="
-    echo ">>> Lambda: $lambda (Relevance=$(echo "1-$lambda" | bc), Diversity=$lambda)"
+    echo ">>> Lambda: $lambda (Relevance=$relevance, Diversity=$lambda)"
     echo "=========================================="
 
     # Export lambda for this run
