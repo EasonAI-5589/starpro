@@ -1032,9 +1032,16 @@ class LlavaMetaForCausalLM(ABC):
             # M=1: 使用relevance+diversity机制（类似CDP3但用贪心而非DPP）
             
             # ========== 超参数配置 ==========
-            coverage_weight = 0.7  # M>1时的覆盖权重
-            relevance_weight = 0.5  # M=1时的相关性权重
-            diversity_weight = 0.5  # 多样性权重
+            # Stage 1 (THCP) Lambda Ablation Support
+            # Formula: L_i(S) = (1-λ)R_i + λD_i(S)
+            # λ=0.0: pure relevance, λ=1.0: pure diversity, λ=0.5: balanced
+            import os
+            lambda_val = float(os.environ.get('LAMBDA', '0.5'))
+
+            # Unified weights using (1-λ)R + λD formula
+            coverage_weight = 1.0 - lambda_val   # (1-λ) for coverage in M>1 mode
+            relevance_weight = 1.0 - lambda_val  # (1-λ) for relevance in M=1 mode
+            diversity_weight = lambda_val        # λ for diversity in both modes
             
             # ========== Debug配置 ==========
             enable_debug = True
@@ -1056,6 +1063,11 @@ class LlavaMetaForCausalLM(ABC):
                 print(f"\n{'='*80}")
                 print(f"THCP Debug - Mode: {debug_info['mode'].upper()}")
                 print(f"{'='*80}")
+                print(f"\n[Lambda Configuration]")
+                print(f"  λ (lambda): {lambda_val}")
+                print(f"  Formula: L_i(S) = (1-λ)R_i + λD_i(S)")
+                print(f"  Relevance weight (1-λ): {relevance_weight}")
+                print(f"  Diversity weight (λ): {diversity_weight}")
                 print(f"\n[Text Embeddings]")
                 print(f"  Shape: {text_embeds.shape}")
                 print(f"  M (num tokens): {M}")
