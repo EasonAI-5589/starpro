@@ -35,7 +35,7 @@ echo ""
 # Write experiment configuration to log
 {
     echo "================================================================================"
-    echo "Stage 1 (THCP) Lambda Ablation Study"
+    echo "Stage 1 Lambda Ablation Study"
     echo "================================================================================"
     echo ""
     echo "Configuration:"
