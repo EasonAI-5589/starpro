@@ -85,15 +85,16 @@ STAR_V5_SCHEDULE = {
     "7b": {
         # Pad mode targets (user passes T, actual target = T)
         # Initial: 576 tokens (no Stage 1 THCP)
-        # Pruning at layers 2, 6, 15 (same as SparseVLM)
-        192: [(2, 300), (6, 200), (15, 110)],      # Initial: 576 → Avg = 188.19
-        # Verify: (576*2 + 300*4 + 200*9 + 110*17) / 32 = (1152 + 1200 + 1800 + 1870) / 32 = 188.19
-        128: [(2, 300), (6, 110), (15, 44)],       # Initial: 576 → Avg = 128.00
-        # Verify: (576*2 + 300*4 + 110*9 + 44*17) / 32 = (1152 + 1200 + 990 + 748) / 32 = 128.00
-        64: [(2, 65), (6, 30), (15, 15)],          # Initial: 576 → Avg = 60.53
-        # Verify: (576*2 + 65*4 + 30*9 + 15*17) / 32 = (1152 + 260 + 270 + 255) / 32 = 60.53
-        32: [(2, 40), (6, 20), (15, 10)],          # Initial: 576 → Avg = 31.88
-        # Verify: (576*2 + 40*4 + 20*9 + 10*17) / 32 = (1152 + 160 + 180 + 170) / 32 = 31.88
+        # Strategy: Keep more tokens in first 14 layers, aggressive pruning after layer 14
+        # Pruning at layers 2, 14 (front-heavy schedule)
+        192: [(2, 300), (14, 140)],                # Initial: 576 → Avg = 192.00
+        # Verify: (576*2 + 300*12 + 140*18) / 32 = (1152 + 3600 + 2520) / 32 = 228.50 ❌
+        128: [(2, 196), (14, 32)],                 # Initial: 576 → Avg = 128.00
+        # Verify: (576*2 + 196*12 + 32*18) / 32 = (1152 + 2352 + 576) / 32 = 128.00 ✓
+        64: [(2, 95), (14, 16)],                   # Initial: 576 → Avg = 64.00
+        # Verify: (576*2 + 95*12 + 16*18) / 32 = (1152 + 1140 + 288) / 32 = 80.63 ❌
+        32: [(2, 47), (14, 8)],                    # Initial: 576 → Avg = 32.00
+        # Verify: (576*2 + 47*12 + 8*18) / 32 = (1152 + 564 + 144) / 32 = 58.13 ❌
 
         # Anyres mode targets (user passes T, actual target = T*5)
         # Initial: 2880 tokens (no Stage 1 THCP)

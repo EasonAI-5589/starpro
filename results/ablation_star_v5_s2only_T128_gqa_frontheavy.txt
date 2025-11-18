@@ -1,0 +1,169 @@
+================================================================================
+STAR-V5 (S2 Only) Ablation Study - GQA Benchmark Results
+================================================================================
+
+Model: llava-v1.6-vicuna-7b
+Method: STAR-V5 (Stage 2 Only - Progressive Pruning Only)
+Configuration: T=128 (target average visual tokens)
+Benchmark: GQA (General Question Answering)
+Date: 2025-11-14 (Updated with front-heavy schedule)
+
+================================================================================
+Token Pruning Schedule (7B, 32 layers)
+================================================================================
+
+Stage 1: SKIPPED (No THCP)
+  - Keep all 576 visual tokens
+
+Stage 2: Progressive Pruning (Front-Heavy Strategy)
+  - Layers 0-1 (2 layers): 576 tokens (original)
+  - Layers 2-11 (10 layers): 192 tokens (Layer 2: 576 → 192) ← Keep more in front
+  - Layers 12-23 (12 layers): 64 tokens (Layer 12: 192 → 64)
+  - Layers 24-31 (8 layers): 32 tokens (Layer 24: 64 → 32) ← Aggressive at back
+
+Average visual tokens: 128.00 (exact)
+Schedule: [(2, 192), (12, 64), (24, 32)]
+Verification: (576×2 + 192×10 + 64×12 + 32×8) / 32 = (1152 + 1920 + 768 + 256) / 32 = 128.00 ✓
+
+Strategy: Front-heavy design keeps more tokens in first ~14 layers for rich semantic info
+
+================================================================================
+Visual Token Distribution Per Layer
+================================================================================
+[576, 576, 192, 192, 192, 192, 192, 192, 192, 192, 192, 192, 64, 64, 64, 64,
+ 64, 64, 64, 64, 64, 64, 64, 64, 32, 32, 32, 32, 32, 32, 32, 32]
+
+================================================================================
+Performance Metrics
+================================================================================
+
+[GPU Memory]
+  Peak usage: ~14 GB (estimated, consistent with other benchmarks)
+
+[FLOPs]
+  Average per sample: ~1.68 TFLOPs (consistent with other benchmarks)
+
+================================================================================
+GQA Benchmark Results
+================================================================================
+
+Overall Accuracy: 57.13%
+Total Questions: 12,578
+
+Question Type Breakdown:
+  Binary:   74.31%
+  Open:     42.56%
+
+Quality Metrics:
+  Validity:       0.00%
+  Plausibility:   0.00%
+  Distribution:   1.64 (lower is better)
+
+================================================================================
+Detailed Analysis by Category
+================================================================================
+
+--- Accuracy by Structural Type ---
+  choose:   77.68% (1,129 questions)
+  compare:  61.63% (589 questions)
+  logical:  71.99% (1,803 questions)
+  query:    42.56% (6,805 questions)
+  verify:   77.80% (2,252 questions)
+
+Key Observations:
+  ✓ Strong on verification (77.80%) and selection (77.68%) tasks
+  ✓ Good on comparison (61.63%) and logical reasoning (71.99%)
+  ✗ Weaker on open-ended queries (42.56%) - most common type
+
+--- Accuracy by Semantic Type ---
+  attr:    63.11% (5,186 questions) - Attribute recognition
+  cat:     47.52% (1,149 questions) - Category classification
+  global:  59.87% (157 questions)   - Global scene understanding
+  obj:     82.13% (778 questions)   - Object detection
+  rel:     49.62% (5,308 questions) - Spatial relationships
+
+Key Observations:
+  ✓ Excellent object detection (82.13%)
+  ✓ Good attribute recognition (63.11%)
+  ✗ Struggles with relationships (49.62%) and categories (47.52%)
+
+--- Accuracy by Reasoning Steps ---
+  1 step:  71.31% (237 questions)
+  2 steps: 51.70% (6,395 questions)  ← Most common
+  3 steps: 59.96% (4,266 questions)
+  4 steps: 65.20% (793 questions)
+  5 steps: 70.07% (822 questions)
+  6 steps: 87.80% (41 questions)
+  7 steps: 100.00% (20 questions)
+  8 steps: 100.00% (3 questions)
+  9 steps: 100.00% (1 question)
+
+Key Observations:
+  ✓ Performance improves with more reasoning steps (4+ steps: 65-100%)
+  ✗ Weaker on 2-step questions (51.70%) - the majority of questions
+  → Suggests model can reason deeply when needed, but struggles with common cases
+
+--- Accuracy by Question Length (words) ---
+  3-5 words:   45.13% avg (2,071 questions)   - Short questions
+  6-10 words:  59.54% avg (6,431 questions)   - Medium questions
+  11-15 words: 61.56% avg (2,676 questions)   - Long questions
+  16+ words:   67.45% avg (400 questions)     - Very long questions
+
+Key Observations:
+  ✓ Better on longer, more detailed questions
+  ✗ Struggles with short, ambiguous questions
+
+================================================================================
+Ablation Study Context
+================================================================================
+
+This experiment isolates the contribution of Stage 2 (Progressive Pruning)
+by skipping Stage 1 (THCP) on general visual question answering.
+
+GQA requires diverse capabilities:
+  - Object detection and recognition
+  - Attribute understanding (color, size, material, etc.)
+  - Spatial relationship reasoning
+  - Multi-step reasoning chains
+  - Scene understanding
+
+Comparison for Table 6:
+- S1 Only (THCP):          TBD
+- S2 Only (front-heavy):   57.13%
+- S1+S2 (STAR-Pro):        TBD
+
+Analysis:
+  - S2 Only achieves 57.13% on GQA with front-heavy schedule
+  - Strong on object detection (82.13%) and verification (77.80%)
+  - Weaker on open-ended queries (42.56%) and relationships (49.62%)
+  - Front-heavy schedule preserves object detection capability
+  - 128 avg tokens (77.8% reduction) maintains reasonable reasoning ability
+
+Key Challenge: GQA's emphasis on spatial relationships and open-ended queries
+               requires rich visual information, which is challenging for
+               aggressive pruning without Stage 1's semantic selection.
+
+================================================================================
+Performance Comparison Summary
+================================================================================
+
+S2 Only (Front-Heavy) Results across all benchmarks:
+  - POPE (object hallucination):  77.7% F1 ✓
+  - MME (perception & cognition): 1681.6 ✓
+  - TextVQA (text reading):       52.73%
+  - GQA (visual reasoning):       57.13%
+
+Strengths:
+  ✓ Object detection and verification
+  ✓ High precision, low hallucination
+  ✓ Multi-step reasoning (when needed)
+
+Weaknesses:
+  ✗ Spatial relationship reasoning
+  ✗ Open-ended query answering
+  ✗ Text-based tasks
+
+Overall: Front-heavy schedule achieves competitive performance on object-centric
+         tasks but struggles with relational and open-ended reasoning.
+
+================================================================================

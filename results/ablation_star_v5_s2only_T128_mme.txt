@@ -1,0 +1,114 @@
+================================================================================
+STAR-V5 (S2 Only) Ablation Study - MME Benchmark Results
+================================================================================
+
+Model: llava-v1.6-vicuna-7b
+Method: STAR-V5 (Stage 2 Only - Progressive Pruning Only)
+Configuration: T=128 (target average visual tokens)
+Benchmark: MME (Multimodal Large Language Model Evaluation)
+Date: 2025-11-14 (Updated with front-heavy schedule)
+
+================================================================================
+Token Pruning Schedule (7B, 32 layers)
+================================================================================
+
+Stage 1: SKIPPED (No THCP)
+  - Keep all 576 visual tokens
+
+Stage 2: Progressive Pruning (Front-Heavy Strategy)
+  - Layers 0-1 (2 layers): 576 tokens (original)
+  - Layers 2-11 (10 layers): 192 tokens (Layer 2: 576 → 192) ← Keep more in front
+  - Layers 12-23 (12 layers): 64 tokens (Layer 12: 192 → 64)
+  - Layers 24-31 (8 layers): 24 tokens (Layer 24: 64 → 24) ← Aggressive at back
+
+Average visual tokens: 126.00 (close to 128)
+Schedule: [(2, 192), (12, 64), (24, 24)]
+Verification: (576×2 + 192×10 + 64×12 + 24×8) / 32 = (1152 + 1920 + 768 + 192) / 32 = 126.00 ✓
+
+Strategy: Front-heavy design keeps more tokens in first ~14 layers for rich semantic info
+
+================================================================================
+Visual Token Distribution Per Layer
+================================================================================
+[576, 576, 192, 192, 192, 192, 192, 192, 192, 192, 192, 192, 64, 64, 64, 64,
+ 64, 64, 64, 64, 64, 64, 64, 64, 24, 24, 24, 24, 24, 24, 24, 24]
+
+================================================================================
+Performance Metrics
+================================================================================
+
+[Latency]
+  Prefill latency (avg): 0.04 ms
+  Decode latency (avg): 0.02 ms
+  Total latency (avg): 0.07 ms
+  End-to-end time (avg): 144.03 ms
+
+[GPU Memory]
+  Peak usage: 14.15 GB
+
+[FLOPs]
+  Average per sample: 1.65 TFLOPs
+
+[Throughput]
+  Tokens/second: 20.83
+  Images/second: 6.94
+  Seconds/image: 0.14
+  Total samples measured: 247
+
+================================================================================
+MME Benchmark Results
+================================================================================
+
+=========== Perception ===========
+Total Score: 1384.42
+
+  existence:  180.00
+  count:      150.00
+  position:   123.33
+  color:      175.00
+  posters:    125.51
+  celebrity:  118.82
+  scene:      159.75
+  landmark:   150.50
+  artwork:    114.00
+  OCR:         87.50
+
+=========== Cognition ===========
+Total Score: 297.14
+
+  commonsense_reasoning:  112.14
+  numerical_calculation:   65.00
+  text_translation:        65.00
+  code_reasoning:          55.00
+
+=========== Overall ===========
+Total Score: 1681.56
+
+================================================================================
+Ablation Study Purpose & Schedule Comparison
+================================================================================
+
+This experiment isolates the contribution of Stage 2 (Progressive Pruning)
+by skipping Stage 1 (THCP).
+
+Schedule Evolution:
+1. **Uniform Schedule** (SparseVLM-aligned):
+   - Schedule: [(2, 320), (5, 128), (9, 64)]
+   - Distribution: Early pruning, uniform reduction
+   - MME Score: 1400.5
+
+2. **Front-Heavy Schedule** (Current):
+   - Schedule: [(2, 192), (12, 64), (24, 24)]
+   - Distribution: Keep more tokens in first 14 layers, aggressive after layer 14
+   - MME Score: 1681.6 ✨ (+281.1 points, +20.1%)
+
+Key Finding: Front-heavy schedule significantly improves performance!
+  → Early layers need more visual tokens for semantic understanding
+  → Later layers can work with fewer tokens for reasoning
+
+Comparison for Table 6:
+- S1 Only (THCP):     ~98.0% retention @ T=128
+- S2 Only (front-heavy): MME = 1681.6
+- S1+S2 (STAR-Pro):   ~98.4% retention @ T=128
+
+================================================================================

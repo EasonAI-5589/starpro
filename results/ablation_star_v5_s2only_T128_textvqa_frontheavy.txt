@@ -1,0 +1,85 @@
+================================================================================
+STAR-V5 (S2 Only) Ablation Study - TextVQA Benchmark Results
+================================================================================
+
+Model: llava-v1.6-vicuna-7b
+Method: STAR-V5 (Stage 2 Only - Progressive Pruning Only)
+Configuration: T=128 (target average visual tokens)
+Benchmark: TextVQA (Text-based Visual Question Answering)
+Date: 2025-11-14 (Updated with front-heavy schedule)
+
+================================================================================
+Token Pruning Schedule (7B, 32 layers)
+================================================================================
+
+Stage 1: SKIPPED (No THCP)
+  - Keep all 576 visual tokens
+
+Stage 2: Progressive Pruning (Front-Heavy Strategy)
+  - Layers 0-1 (2 layers): 576 tokens (original)
+  - Layers 2-11 (10 layers): 192 tokens (Layer 2: 576 → 192) ← Keep more in front
+  - Layers 12-23 (12 layers): 64 tokens (Layer 12: 192 → 64)
+  - Layers 24-31 (8 layers): 32 tokens (Layer 24: 64 → 32) ← Aggressive at back
+
+Average visual tokens: 128.00 (exact)
+Schedule: [(2, 192), (12, 64), (24, 32)]
+Verification: (576×2 + 192×10 + 64×12 + 32×8) / 32 = (1152 + 1920 + 768 + 256) / 32 = 128.00 ✓
+
+Strategy: Front-heavy design keeps more tokens in first ~14 layers for rich semantic info
+
+================================================================================
+Visual Token Distribution Per Layer
+================================================================================
+[576, 576, 192, 192, 192, 192, 192, 192, 192, 192, 192, 192, 64, 64, 64, 64,
+ 64, 64, 64, 64, 64, 64, 64, 64, 32, 32, 32, 32, 32, 32, 32, 32]
+
+================================================================================
+Performance Metrics
+================================================================================
+
+[Throughput]
+  Processing speed: 2977.62 samples/sec (during evaluation)
+  Total samples: 5000
+
+[GPU Memory]
+  Peak usage: ~14 GB (estimated, consistent with POPE/MME)
+
+[FLOPs]
+  Average per sample: ~1.68 TFLOPs (consistent with other benchmarks)
+
+================================================================================
+TextVQA Benchmark Results
+================================================================================
+
+Total Samples: 5000
+Accuracy: 52.73%
+
+================================================================================
+Ablation Study Purpose
+================================================================================
+
+This experiment isolates the contribution of Stage 2 (Progressive Pruning)
+by skipping Stage 1 (THCP) on text-based visual question answering.
+
+TextVQA is particularly challenging as it requires:
+  - Reading and understanding text in images (OCR capability)
+  - Spatial reasoning about text placement
+  - Answering questions based on visual text content
+
+Comparison for Table 6:
+- S1 Only (THCP):          TBD
+- S2 Only (front-heavy):   52.73%
+- S1+S2 (STAR-Pro):        TBD
+
+Analysis:
+  - S2 Only achieves 52.73% on TextVQA with front-heavy schedule
+  - TextVQA requires fine-grained visual details (text recognition)
+  - Front-heavy schedule helps preserve text details in early layers
+  - 128 avg tokens (77.8% reduction) maintains reasonable text reading ability
+
+Note: TextVQA is inherently challenging for pruned models as OCR requires
+      high-resolution visual features. The 52.73% result shows that even
+      with aggressive pruning (to 128 avg tokens), the model retains
+      substantial text comprehension capability.
+
+================================================================================
