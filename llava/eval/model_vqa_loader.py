@@ -136,7 +136,6 @@ def eval_model(args):
 
     # Progress bar control: reads ENABLE_DEBUG from environment
     # Set ENABLE_DEBUG=1 to show progress bar, ENABLE_DEBUG=0 (or unset) for clean logs
-    import os
     show_progress = os.environ.get('ENABLE_DEBUG', '0') == '1'
     data_bar = tqdm(zip(data_loader, questions), total=len(questions), disable=not show_progress)
     data_num = 0
