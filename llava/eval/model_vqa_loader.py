@@ -134,7 +134,8 @@ def eval_model(args):
     total_end_to_end_time = 0.0
     performance_samples = 0
 
-    data_bar = tqdm(zip(data_loader, questions), total=len(questions))
+    # Disable progress bar for cleaner logs (set disable=False to show progress)
+    data_bar = tqdm(zip(data_loader, questions), total=len(questions), disable=True)
     data_num = 0
     for (input_ids, image_tensors, image_sizes), line in data_bar:
         idx = line["question_id"]
