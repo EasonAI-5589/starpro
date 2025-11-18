@@ -1239,9 +1239,13 @@ class LlavaMetaForCausalLM(ABC):
             # Stage 1 (here): THCP pruning → keep target*2 tokens (adaptive to final target)
             # Stage 2 (in modeling_llama_star): Progressive pruning → target*2 → target
 
-            print(f"\n{'='*80}")
-            print(f"STAR-V3 Stage 1: THCP Text-Concept Coverage (Adaptive)")
-            print(f"{'='*80}")
+            # ========== Debug配置 ==========
+            enable_debug = False
+
+            if enable_debug:
+                print(f"\n{'='*80}")
+                print(f"STAR-V3 Stage 1: THCP Text-Concept Coverage (Adaptive)")
+                print(f"{'='*80}")
 
             # ========== 检测 anyres 多 patch 情况 ==========
             is_anyres_multi_patch = (B > 1 and
@@ -1268,28 +1272,31 @@ class LlavaMetaForCausalLM(ABC):
             # 🔥 Anyres 多 patch：每个 patch 按比例分配 tokens
             if is_anyres_multi_patch:
                 tokens_per_patch = stage1_keep_num // B
-                print(f"[Anyres Multi-Patch Detected]")
-                print(f"  {B} patches × {N} tokens/patch = {B * N} total tokens")
-                print(f"  Each patch keeps: {tokens_per_patch} tokens")
-                print(f"  Total after Stage 1: {tokens_per_patch * B} tokens")
+                if enable_debug:
+                    print(f"[Anyres Multi-Patch Detected]")
+                    print(f"  {B} patches × {N} tokens/patch = {B * N} total tokens")
+                    print(f"  Each patch keeps: {tokens_per_patch} tokens")
+                    print(f"  Total after Stage 1: {tokens_per_patch * B} tokens")
             else:
                 tokens_per_patch = stage1_keep_num
 
-            print(f"\n[Lambda Configuration]")
-            print(f"  λ (lambda): {lambda_val}")
-            print(f"  Formula: L_i(S) = (1-λ)R_i + λD_i(S)")
-            print(f"  Relevance weight (1-λ): {relevance_weight}")
-            print(f"  Diversity weight (λ): {diversity_weight}")
+            if enable_debug:
+                print(f"\n[Lambda Configuration]")
+                print(f"  λ (lambda): {lambda_val}")
+                print(f"  Formula: L_i(S) = (1-λ)R_i + λD_i(S)")
+                print(f"  Relevance weight (1-λ): {relevance_weight}")
+                print(f"  Diversity weight (λ): {diversity_weight}")
 
-            print(f"\n[Stage 1 Config - Adaptive to Target]")
-            print(f"  Original tokens per patch: {N}")
-            print(f"  Stage 1 keeps per patch: {tokens_per_patch}")
-            print(f"  Final target: {self.visual_token_num}")
-            print(f"  Text tokens (M): {M}")
+                print(f"\n[Stage 1 Config - Adaptive to Target]")
+                print(f"  Original tokens per patch: {N}")
+                print(f"  Stage 1 keeps per patch: {tokens_per_patch}")
+                print(f"  Final target: {self.visual_token_num}")
+                print(f"  Text tokens (M): {M}")
 
             # 判断使用哪种模式（与THCP完全一致）
             use_coverage_mode = (M > 1)
-            print(f"  THCP Mode: {'Coverage (M>1)' if use_coverage_mode else 'Relevance (M=1)'}")
+            if enable_debug:
+                print(f"  THCP Mode: {'Coverage (M>1)' if use_coverage_mode else 'Relevance (M=1)'}")
 
             all_masks = []
 
@@ -1382,14 +1389,15 @@ class LlavaMetaForCausalLM(ABC):
             # 🔥 关键：生成 (B, N) 的 index_masks
             index_masks = torch.stack(all_masks, dim=0)
 
-            print(f"\n[Stage 1 Output - THCP Selection Complete]")
-            print(f"  index_masks shape: {index_masks.shape}  # (B, N)")
-            print(f"  Selected tokens per batch: {index_masks.sum(dim=1).tolist()}")
-            print(f"  image_features shape: {image_features.shape}  # (B, N, D)")
-            print(f"  ✓ THCP Stage 1 complete")
-            print(f"  ✓ Ready for mm_projector")
-            print(f"  ✓ Ready for Stage 2 progressive pruning in modeling_llama_star")
-            print(f"{'='*80}\n")
+            if enable_debug:
+                print(f"\n[Stage 1 Output - THCP Selection Complete]")
+                print(f"  index_masks shape: {index_masks.shape}  # (B, N)")
+                print(f"  Selected tokens per batch: {index_masks.sum(dim=1).tolist()}")
+                print(f"  image_features shape: {image_features.shape}  # (B, N, D)")
+                print(f"  ✓ THCP Stage 1 complete")
+                print(f"  ✓ Ready for mm_projector")
+                print(f"  ✓ Ready for Stage 2 progressive pruning in modeling_llama_star")
+                print(f"{'='*80}\n")
 
         elif self.pruning_method == 'star_v5':
             # STAR-V5: S2 Only Ablation (Skip Stage 1 THCP, Progressive Pruning Only)
