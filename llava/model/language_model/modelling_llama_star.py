@@ -178,13 +178,15 @@ class STARVLMModel(LlamaModel):
             # Note: User should pass T=128 for pad, T=640 for anyres (manually adjusted)
             self.visual_token_length = self.target_visual_tokens * 2
             self.pruning_schedule = STAR_V3_SCHEDULE[self.scale][self.target_visual_tokens]
-            print(f"[STAR-V3 Stage 2] Initialized")
-            print(f"  Scale: {self.scale}")
-            print(f"  Aspect ratio: {'anyres' if self.anyres else 'pad'}")
-            print(f"  User passed T: {starvlm_config['T']}")
-            print(f"  Expected input from Stage 1: {self.visual_token_length} tokens (T × 2)")
-            print(f"  Stage 1 method: THCP (adaptive to target)")
-            print(f"  Target tokens: {self.target_visual_tokens}")
+            import os
+            if os.environ.get('ENABLE_DEBUG', '0') == '1':
+                print(f"[STAR-V3 Stage 2] Initialized")
+                print(f"  Scale: {self.scale}")
+                print(f"  Aspect ratio: {'anyres' if self.anyres else 'pad'}")
+                print(f"  User passed T: {starvlm_config['T']}")
+                print(f"  Expected input from Stage 1: {self.visual_token_length} tokens (T × 2)")
+                print(f"  Stage 1 method: THCP (adaptive to target)")
+                print(f"  Target tokens: {self.target_visual_tokens}")
         elif self.mode == "star_v5":
             # STAR-V5: S2 Only ablation (Stage 1 skipped, progressive pruning only)
             # Stage 1 (llava_arch) skips THCP and keeps all 576 (or 2880) tokens
@@ -192,34 +194,42 @@ class STARVLMModel(LlamaModel):
             # Keep visual_token_length at full size (576 or 2880)
             # visual_token_length is already set above based on aspect_ratio
             self.pruning_schedule = STAR_V5_SCHEDULE[self.scale][self.target_visual_tokens]
-            print(f"\n{'='*80}")
-            print(f"[STAR-V5 Stage 2 Only] Initialized (Ablation: S2 Only)")
-            print(f"  Scale: {self.scale} ({config.num_hidden_layers} layers)")
-            print(f"  Aspect ratio: {'anyres' if self.anyres else 'pad'}")
-            print(f"  User passed T: {starvlm_config['T']}")
-            print(f"  Expected input from Stage 1: {self.visual_token_length} tokens (all tokens, no THCP)")
-            print(f"  Stage 1: SKIPPED (no THCP)")
-            print(f"  Stage 2: Progressive pruning {self.visual_token_length} → {self.target_visual_tokens}")
-            print(f"  Pruning schedule: {self.pruning_schedule}")
-            print(f"{'='*80}\n")
+            import os
+            if os.environ.get('ENABLE_DEBUG', '0') == '1':
+                print(f"\n{'='*80}")
+                print(f"[STAR-V5 Stage 2 Only] Initialized (Ablation: S2 Only)")
+                print(f"  Scale: {self.scale} ({config.num_hidden_layers} layers)")
+                print(f"  Aspect ratio: {'anyres' if self.anyres else 'pad'}")
+                print(f"  User passed T: {starvlm_config['T']}")
+                print(f"  Expected input from Stage 1: {self.visual_token_length} tokens (all tokens, no THCP)")
+                print(f"  Stage 1: SKIPPED (no THCP)")
+                print(f"  Stage 2: Progressive pruning {self.visual_token_length} → {self.target_visual_tokens}")
+                print(f"  Pruning schedule: {self.pruning_schedule}")
+                print(f"{'='*80}\n")
         elif self.mode == "star_v2":
             # STAR-V2: Two-stage mode (Stage 1 gives 288 tokens, fixed 50%)
             self.visual_token_length = self.visual_token_length // 2
             self.pruning_schedule = STAR_V2_SCHEDULE[self.scale][self.target_visual_tokens]
-            print(f"[STAR-V2 Stage 2] Initialized")
-            print(f"  Scale: {self.scale}")
-            print(f"  Expected input from Stage 1: {self.visual_token_length} tokens")
-            print(f"  Stage 1 method: Self-similarity")
-            print(f"  Target tokens: {self.target_visual_tokens}")
+            import os
+            if os.environ.get('ENABLE_DEBUG', '0') == '1':
+                print(f"[STAR-V2 Stage 2] Initialized")
+                print(f"  Scale: {self.scale}")
+                print(f"  Expected input from Stage 1: {self.visual_token_length} tokens")
+                print(f"  Stage 1 method: Self-similarity")
+                print(f"  Target tokens: {self.target_visual_tokens}")
         else:
             # Original single-stage mode
             self.pruning_schedule = STAR_FASTV_SCHEDULE[self.scale][self.target_visual_tokens]
-            print(f"[STAR-FastV] Initialized")
-            print(f"  Scale: {self.scale}")
-            print(f"  Target tokens: {self.target_visual_tokens}")
+            import os
+            if os.environ.get('ENABLE_DEBUG', '0') == '1':
+                print(f"[STAR-FastV] Initialized")
+                print(f"  Scale: {self.scale}")
+                print(f"  Target tokens: {self.target_visual_tokens}")
 
         self.pruning_layers = {layer_idx: target for layer_idx, target in self.pruning_schedule}
-        print(f"  Pruning schedule: {self.pruning_schedule}")
+        import os
+        if os.environ.get('ENABLE_DEBUG', '0') == '1':
+            print(f"  Pruning schedule: {self.pruning_schedule}")
 
         self.reset_state()
 
@@ -244,8 +254,12 @@ class STARVLMModel(LlamaModel):
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
 
+        # Read debug flag from environment
+        import os
+        enable_debug = os.environ.get('ENABLE_DEBUG', '0') == '1'
+
         # ============ DEBUG: 追踪序列长度来源 ============
-        if past_key_values is None:  # 只在 prefill 阶段打印
+        if enable_debug and past_key_values is None:  # 只在 prefill 阶段打印
             print("\n" + "="*80)
             print("🔍 [STAR-V3 DEBUG] Forward Input Analysis")
             print("="*80)
@@ -374,7 +388,8 @@ class STARVLMModel(LlamaModel):
                 mode_name = "STAR-V5 Stage 2"
             else:
                 mode_name = "STAR-FastV"
-            print(f"[{mode_name}] Prefill: visual tokens = {self.current_visual_length}, target = {self.target_visual_tokens}")
+            if enable_debug:
+                print(f"[{mode_name}] Prefill: visual tokens = {self.current_visual_length}, target = {self.target_visual_tokens}")
 
         # Process layers with progressive pruning
         all_hidden_states = () if output_hidden_states else None
@@ -387,7 +402,7 @@ class STARVLMModel(LlamaModel):
             self.layer_visual_tokens = []
 
         # DEBUG: Print forward pass info
-        if self.mode == "star_v5":
+        if enable_debug and self.mode == "star_v5":
             print(f"\n[STAR-V5 DEBUG] Forward pass: seq_length={seq_length}, prefill_done={self.prefill_done}, past_kv={'None' if past_key_values is None else 'exists'}")
 
         for decoder_layer in self.layers:
@@ -404,7 +419,7 @@ class STARVLMModel(LlamaModel):
 
             # Apply text-guided pruning at scheduled layers
             # DEBUG: Check pruning conditions for STAR-V5
-            if self.mode == "star_v5" and layer_idx in [1, 3, 11, 23]:
+            if enable_debug and self.mode == "star_v5" and layer_idx in [1, 3, 11, 23]:
                 print(f"[STAR-V5 DEBUG] Layer {layer_idx}: seq_len={seq_length}, prefill_done={self.prefill_done}, in_schedule={layer_idx in self.pruning_layers}")
 
             if seq_length > 1 and self.prefill_done and layer_idx in self.pruning_layers:
@@ -426,7 +441,8 @@ class STARVLMModel(LlamaModel):
                         mode_name = "STAR-V5 Stage 2"
                     else:
                         mode_name = "STAR-FastV"
-                    print(f"\n[{mode_name}] Layer {layer_idx}: Pruning {self.current_visual_length} → {target_visual_length}")
+                    if enable_debug:
+                        print(f"\n[{mode_name}] Layer {layer_idx}: Pruning {self.current_visual_length} → {target_visual_length}")
 
                     # Forward pass to get attention scores
                     if self.gradient_checkpointing and self.training:
@@ -479,7 +495,8 @@ class STARVLMModel(LlamaModel):
                             num_raters = max(1, len(text_importance) // 2)
                             text_rater_indices = text_importance.topk(num_raters).indices
 
-                        print(f"[{mode_name}] Using {len(text_rater_indices)} text rater tokens (out of {len(text_importance)} text tokens)")
+                        if enable_debug:
+                            print(f"[{mode_name}] Using {len(text_rater_indices)} text rater tokens (out of {len(text_importance)} text tokens)")
 
                         # Aggregate attention from text raters to visual tokens
                         # Average across heads: (B, seq_len, seq_len)
@@ -495,23 +512,26 @@ class STARVLMModel(LlamaModel):
                         # Aggregate: mean across text raters
                         visual_attention = rater_to_visual_attn.mean(dim=0)  # (N_vis,)
 
-                        print(f"[{mode_name}] Multi-token text guidance - Visual attention stats: "
-                              f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
-                              f"max={visual_attention.max():.4f}")
+                        if enable_debug:
+                            print(f"[{mode_name}] Multi-token text guidance - Visual attention stats: "
+                                  f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
+                                  f"max={visual_attention.max():.4f}")
                     else:
                         # STAR (original): Use last token attention (PDrop-style)
                         attn_avg = layer_attention.mean(dim=1)  # (B, seq_len, seq_len)
                         visual_attention = attn_avg[0, -1, visual_start:visual_end]  # (N_vis,)
 
-                        print(f"[{mode_name}] Single-token text guidance - Visual attention stats: "
-                              f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
-                              f"max={visual_attention.max():.4f}")
+                        if enable_debug:
+                            print(f"[{mode_name}] Single-token text guidance - Visual attention stats: "
+                                  f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
+                                  f"max={visual_attention.max():.4f}")
 
                     # Select top-k important visual tokens (text-guided)
                     keep_indices = torch.topk(visual_attention, k=target_visual_length).indices
                     keep_indices = keep_indices.sort().values  # Sort to maintain position order
 
-                    print(f"[{mode_name}] Selected {len(keep_indices)} tokens using text-to-visual attention")
+                    if enable_debug:
+                        print(f"[{mode_name}] Selected {len(keep_indices)} tokens using text-to-visual attention")
 
                     # Update indices and hidden states
                     # Fix: Ensure keep_indices is on the same device as visual_token_indices for accelerate compatibility
@@ -551,7 +571,8 @@ class STARVLMModel(LlamaModel):
                         ], dim=2)
 
                     self.current_visual_length = target_visual_length
-                    print(f"[{mode_name}] Layer {layer_idx}: ✓ Pruning complete. Current tokens: {self.current_visual_length}")
+                    if enable_debug:
+                        print(f"[{mode_name}] Layer {layer_idx}: ✓ Pruning complete. Current tokens: {self.current_visual_length}")
 
                     if use_cache:
                         next_decoder_cache = layer_outputs[2 if output_attentions else 1]

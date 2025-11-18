@@ -76,7 +76,9 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         
         # ⭐ Model selection with STAR support
         if use_star:
-            print(f"🌟 Use STAR: {star_config}")
+            import os
+            if os.environ.get('ENABLE_DEBUG', '0') == '1':
+                print(f"🌟 Use STAR: {star_config}")
             self.model = STARLlavaLlamaModel(config, star_config=star_config)
         elif use_fastv:
             print(f"Use FastV: {fastv_config}")

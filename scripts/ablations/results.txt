@@ -1,0 +1,168 @@
+======================================================================
+=========== Perception ===========
+total score: 1418.2716086434575 
+
+         existence  score: 190.0
+         count  score: 153.33333333333334
+         position  score: 115.0
+         color  score: 145.0
+         posters  score: 144.21768707482994
+         celebrity  score: 116.47058823529412
+         scene  score: 160.0
+         landmark  score: 155.0
+         artwork  score: 114.25
+         OCR  score: 125.0
+
+
+=========== Cognition ===========
+total score: 347.8571428571429 
+
+         commonsense_reasoning  score: 112.85714285714286
+         numerical_calculation  score: 50.0
+         text_translation  score: 127.5
+         code_reasoning  score: 57.5
+
+
+=========== ALL ===========
+total score: 1766.1287515006004 
+
+==========================================
+Stage 1 Lambda=1 Ablation Completed!
+==========================================
+
+======================================================================
+=========== Perception ===========
+total score: 1438.7323929571828 
+
+         existence  score: 190.0
+         count  score: 150.0
+         position  score: 120.0
+         color  score: 145.0
+         posters  score: 144.21768707482994
+         celebrity  score: 116.76470588235293
+         scene  score: 160.75
+         landmark  score: 154.25
+         artwork  score: 117.75
+         OCR  score: 140.0
+
+
+=========== Cognition ===========
+total score: 357.1428571428571 
+
+         commonsense_reasoning  score: 112.14285714285714
+         numerical_calculation  score: 65.0
+         text_translation  score: 135.0
+         code_reasoning  score: 45.0
+
+
+=========== ALL ===========
+total score: 1795.87525010004 
+
+
+>>> ✓ Finished Lambda=0.75 (Relevance=0.25, Diversity=0.75)
+
+==========================================
+Stage 1 Lambda Ablation Completed!
+==========================================
+
+
+
+======================================================================
+=========== Perception ===========
+total score: 1444.0227090836333 
+
+         existence  score: 190.0
+         count  score: 150.0
+         position  score: 120.0
+         color  score: 150.0
+         posters  score: 143.5374149659864
+         celebrity  score: 118.23529411764704
+         scene  score: 159.75
+         landmark  score: 156.5
+         artwork  score: 118.5
+         OCR  score: 137.5
+
+
+=========== Cognition ===========
+total score: 334.6428571428571 
+
+         commonsense_reasoning  score: 112.14285714285714
+         numerical_calculation  score: 60.0
+         text_translation  score: 120.0
+         code_reasoning  score: 42.5
+
+
+=========== ALL ===========
+total score: 1778.6655662264905 
+
+
+>>> ✓ Finished Lambda=0.5 (Relevance=0.5, Diversity=0.5)
+
+
+
+======================================================================
+=========== Perception ===========
+total score: 1456.1792717086835 
+
+         existence  score: 190.0
+         count  score: 150.0
+         position  score: 120.0
+         color  score: 155.0
+         posters  score: 145.23809523809524
+         celebrity  score: 117.94117647058823
+         scene  score: 159.75
+         landmark  score: 152.0
+         artwork  score: 118.75
+         OCR  score: 147.5
+
+
+=========== Cognition ===========
+total score: 337.1428571428571 
+
+         commonsense_reasoning  score: 112.14285714285714
+         numerical_calculation  score: 55.0
+         text_translation  score: 127.5
+         code_reasoning  score: 42.5
+
+
+=========== ALL ===========
+total score: 1793.3221288515406 
+
+
+>>> ✓ Finished Lambda=0.25 (Relevance=0.75, Diversity=0.25)
+
+==========================================
+Stage 1 Lambda Ablation Completed!
+==========================================
+
+
+======================================================================
+=========== Perception ===========
+total score: 1450.1664665866347 
+
+         existence  score: 190.0
+         count  score: 150.0
+         position  score: 115.0
+         color  score: 160.0
+         posters  score: 145.57823129251702
+         celebrity  score: 115.58823529411765
+         scene  score: 159.75
+         landmark  score: 153.5
+         artwork  score: 115.75
+         OCR  score: 145.0
+
+
+=========== Cognition ===========
+total score: 333.92857142857144 
+
+         commonsense_reasoning  score: 116.42857142857144
+         numerical_calculation  score: 62.5
+         text_translation  score: 112.5
+         code_reasoning  score: 42.5
+
+
+=========== ALL ===========
+total score: 1784.0950380152062 
+
+
+>>> ✓ Finished Lambda=0 (Relevance=1, Diversity=0)

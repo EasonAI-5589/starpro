@@ -78,6 +78,11 @@ def create_data_loader(questions, image_folder, tokenizer, image_processor, mode
 
 
 def eval_model(args):
+    # Suppress warnings if ENABLE_DEBUG is not set
+    if os.environ.get('ENABLE_DEBUG', '0') != '1':
+        import warnings
+        warnings.filterwarnings('ignore')
+
     # Model
     disable_torch_init()
     model_path = os.path.expanduser(args.model_path)
