@@ -472,7 +472,7 @@ class STARVLMModel(LlamaModel):
 
                     # ========== Stage 2 Text Aggregation Strategy ==========
                     # Read text aggregation mode from environment (for ablation study)
-                    # Options: last_token, multi_token (default), average_all
+                    # Options: last_token, top_k, multi_token (default), average_all
                     text_agg_mode = os.environ.get('TEXT_AGG_MODE', 'multi_token')
 
                     # Average across heads: (B, seq_len, seq_len)
@@ -484,6 +484,37 @@ class STARVLMModel(LlamaModel):
 
                         if enable_debug:
                             print(f"[{mode_name}] Last-token-only guidance - Visual attention stats: "
+                                  f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
+                                  f"max={visual_attention.max():.4f}")
+
+                    elif text_agg_mode == 'top_k':
+                        # Baseline: Use fixed top-K most important text tokens
+                        # Extract visual and text hidden states
+                        visual_hidden = hidden_states[:, visual_start:visual_end]  # (B, N_vis, D)
+                        text_hidden = hidden_states[:, visual_end:]  # (B, N_text, D)
+
+                        # Compute text-visual similarity to find important text tokens
+                        text_visual_sim = torch.matmul(text_hidden, visual_hidden.transpose(1, 2))
+                        text_visual_sim = text_visual_sim.squeeze(0)  # (N_text, N_vis)
+                        text_importance = text_visual_sim.softmax(dim=0).mean(dim=1)  # (N_text,)
+
+                        # Select fixed top-K tokens (default K=3, configurable via TOP_K_TOKENS env)
+                        K = int(os.environ.get('TOP_K_TOKENS', '3'))
+                        num_text_tokens = len(text_importance)
+                        K = min(K, num_text_tokens)  # Ensure K doesn't exceed available tokens
+                        topk_indices = text_importance.topk(K).indices
+
+                        if enable_debug:
+                            print(f"[{mode_name}] Top-{K} tokens (out of {num_text_tokens}) guidance")
+
+                        # Get attention from top-K tokens to visual region
+                        topk_positions = topk_indices + visual_end
+                        topk_positions = topk_positions.to(attn_avg.device)
+                        topk_to_visual_attn = attn_avg[0, topk_positions, visual_start:visual_end]  # (K, N_vis)
+                        visual_attention = topk_to_visual_attn.mean(dim=0)  # (N_vis,)
+
+                        if enable_debug:
+                            print(f"[{mode_name}] Top-{K} guidance - Visual attention stats: "
                                   f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
                                   f"max={visual_attention.max():.4f}")
 

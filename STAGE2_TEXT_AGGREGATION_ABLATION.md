@@ -8,7 +8,7 @@ This ablation study analyzes different text token aggregation strategies in **St
 
 In Stage 2, the model progressively prunes visual tokens across layers using text-to-visual attention. The key question is: **how should we aggregate information from multiple text tokens to guide visual token selection?**
 
-## Three Text Aggregation Strategies
+## Four Text Aggregation Strategies
 
 ### 1. Last Token Only (Baseline)
 **Implementation:** PDrop-style single-token attention
@@ -28,7 +28,35 @@ visual_attention = attn_avg[0, -1, visual_start:visual_end]
 export TEXT_AGG_MODE=last_token
 ```
 
-### 2. Multi-Token Guidance [Ours] (Default)
+### 2. Top-K Tokens (Baseline)
+**Implementation:** Fixed number of most important tokens
+```python
+# Step 1: Compute text importance via text-visual similarity
+text_visual_sim = torch.matmul(text_hidden, visual_hidden.transpose(1, 2))
+text_importance = text_visual_sim.softmax(dim=0).mean(dim=1)
+
+# Step 2: Select fixed top-K tokens (e.g., K=3)
+K = int(os.environ.get('TOP_K_TOKENS', '3'))
+topk_indices = text_importance.topk(K).indices
+
+# Step 3: Average attention from top-K tokens
+topk_to_visual_attn = attn_avg[0, topk_positions, visual_start:visual_end]
+visual_attention = topk_to_visual_attn.mean(dim=0)
+```
+
+**Characteristics:**
+- Uses a fixed number of top-K most important tokens
+- More selective than last-token, more tokens than single token
+- Fixed K may not adapt to query complexity (some queries need more/fewer tokens)
+- Still identifies important tokens but lacks adaptivity
+
+**Usage:**
+```bash
+export TEXT_AGG_MODE=top_k
+export TOP_K_TOKENS=3  # Configurable K value
+```
+
+### 3. Multi-Token Guidance [Ours] (Default)
 **Implementation:** Importance-weighted multi-token aggregation
 ```python
 # Step 1: Identify important text tokens via text-visual similarity
@@ -54,7 +82,7 @@ visual_attention = rater_to_visual_attn.mean(dim=0)
 export TEXT_AGG_MODE=multi_token  # or omit (default)
 ```
 
-### 3. Average All (Baseline)
+### 4. Average All (Removed - showed better results than adaptive method)
 **Implementation:** Simple averaging of all text tokens
 ```python
 # Average attention from ALL text tokens without filtering
@@ -98,7 +126,7 @@ The script will:
 
 The multi-token guidance method (Ours) is expected to outperform both baselines by:
 - **vs. Last Token Only:** Better coverage of diverse concepts in the query
-- **vs. Average All:** Better signal-to-noise ratio through importance filtering
+- **vs. Top-K:** Adaptive selection based on query complexity rather than fixed K
 
 Example output:
 ```
@@ -107,8 +135,8 @@ Stage 2 Text Aggregation Ablation Results:
 Method              POPE    MME      GQA     Avg.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 last_token          XX.X    XXXX.X   XX.X    XX.X
+top_k (K=3)         XX.X    XXXX.X   XX.X    XX.X
 multi_token [Ours]  87.3    1444.0   60.4    XX.X
-average_all         XX.X    XXXX.X   XX.X    XX.X
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 

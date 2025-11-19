@@ -13,7 +13,7 @@ TOKEN_BUDGET=128
 LAMBDA=0.5
 
 # Text aggregation modes to test
-TEXT_AGG_MODES=(last_token multi_token average_all)
+TEXT_AGG_MODES=(last_token top_k multi_token)
 
 # Evaluation tasks
 TASKS=(mme)
@@ -47,8 +47,8 @@ echo ""
     echo ""
     echo "Text Aggregation Modes:"
     echo "  - last_token: Use only last text token (PDrop baseline)"
-    echo "  - multi_token: Importance-weighted multi-token [Ours]"
-    echo "  - average_all: Simple average of all text tokens"
+    echo "  - top_k: Use fixed top-K important tokens (K=3)"
+    echo "  - multi_token: Adaptive above-average importance tokens [Ours]"
     echo ""
     echo "Modes to test: ${TEXT_AGG_MODES[@]}"
     echo "Benchmarks: ${TASKS[@]}"
@@ -68,6 +68,7 @@ for mode in "${TEXT_AGG_MODES[@]}"; do
 
     # Export configuration for this run
     export TEXT_AGG_MODE=$mode
+    export TOP_K_TOKENS=3  # For top_k mode
     export LAMBDA=$LAMBDA
     export ENABLE_DEBUG=$ENABLE_DEBUG
 
