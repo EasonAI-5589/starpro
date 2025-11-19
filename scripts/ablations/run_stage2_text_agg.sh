@@ -47,7 +47,7 @@ echo ""
     echo ""
     echo "Text Aggregation Modes:"
     echo "  - last_token: Use only last text token (PDrop baseline)"
-    echo "  - top_k: Use fixed top-K important tokens (K=3)"
+    echo "  - top_k: Use fixed top-K important tokens (K=10)"
     echo "  - multi_token: Adaptive above-average importance tokens [Ours]"
     echo ""
     echo "Modes to test: ${TEXT_AGG_MODES[@]}"
@@ -68,7 +68,7 @@ for mode in "${TEXT_AGG_MODES[@]}"; do
 
     # Export configuration for this run
     export TEXT_AGG_MODE=$mode
-    export TOP_K_TOKENS=3  # For top_k mode
+    export TOP_K_TOKENS=10  # For top_k mode
     export LAMBDA=$LAMBDA
     export ENABLE_DEBUG=$ENABLE_DEBUG
 

@@ -135,7 +135,7 @@ Stage 2 Text Aggregation Ablation Results:
 Method              POPE    MME      GQA     Avg.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 last_token          XX.X    XXXX.X   XX.X    XX.X
-top_k (K=3)         XX.X    XXXX.X   XX.X    XX.X
+top_k (K=10)        XX.X    XXXX.X   XX.X    XX.X
 multi_token [Ours]  87.3    1444.0   60.4    XX.X
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
