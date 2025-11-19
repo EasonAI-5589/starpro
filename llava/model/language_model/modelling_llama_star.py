@@ -487,6 +487,32 @@ class STARVLMModel(LlamaModel):
                                   f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
                                   f"max={visual_attention.max():.4f}")
 
+                    elif text_agg_mode == 'random':
+                        # Baseline: Randomly select K text tokens (no importance consideration)
+                        seq_length = hidden_states.shape[1]
+                        num_text_tokens = seq_length - visual_end
+
+                        # Select random K tokens (default K=10, same as top_k for fair comparison)
+                        K = int(os.environ.get('TOP_K_TOKENS', '10'))
+                        K = min(K, num_text_tokens)  # Ensure K doesn't exceed available tokens
+
+                        # Random selection without replacement
+                        random_indices = torch.randperm(num_text_tokens, device=hidden_states.device)[:K]
+
+                        if enable_debug:
+                            print(f"[{mode_name}] Random-{K} tokens (out of {num_text_tokens}) guidance")
+
+                        # Get attention from random tokens to visual region
+                        random_positions = random_indices + visual_end
+                        random_positions = random_positions.to(attn_avg.device)
+                        random_to_visual_attn = attn_avg[0, random_positions, visual_start:visual_end]  # (K, N_vis)
+                        visual_attention = random_to_visual_attn.mean(dim=0)  # (N_vis,)
+
+                        if enable_debug:
+                            print(f"[{mode_name}] Random-{K} guidance - Visual attention stats: "
+                                  f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
+                                  f"max={visual_attention.max():.4f}")
+
                     elif text_agg_mode == 'top_k':
                         # Baseline: Use fixed top-K most important text tokens
                         # Extract visual and text hidden states
@@ -498,8 +524,8 @@ class STARVLMModel(LlamaModel):
                         text_visual_sim = text_visual_sim.squeeze(0)  # (N_text, N_vis)
                         text_importance = text_visual_sim.softmax(dim=0).mean(dim=1)  # (N_text,)
 
-                        # Select fixed top-K tokens (default K=3, configurable via TOP_K_TOKENS env)
-                        K = int(os.environ.get('TOP_K_TOKENS', '3'))
+                        # Select fixed top-K tokens (default K=10, configurable via TOP_K_TOKENS env)
+                        K = int(os.environ.get('TOP_K_TOKENS', '10'))
                         num_text_tokens = len(text_importance)
                         K = min(K, num_text_tokens)  # Ensure K doesn't exceed available tokens
                         topk_indices = text_importance.topk(K).indices

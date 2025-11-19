@@ -13,7 +13,7 @@ TOKEN_BUDGET=128
 LAMBDA=0.5
 
 # Text aggregation modes to test
-TEXT_AGG_MODES=(last_token top_k multi_token)
+TEXT_AGG_MODES=(last_token random top_k multi_token)
 
 # Evaluation tasks
 TASKS=(mme)
@@ -47,6 +47,7 @@ echo ""
     echo ""
     echo "Text Aggregation Modes:"
     echo "  - last_token: Use only last text token (PDrop baseline)"
+    echo "  - random: Randomly select K tokens (no importance, K=10)"
     echo "  - top_k: Use fixed top-K important tokens (K=10)"
     echo "  - multi_token: Adaptive above-average importance tokens [Ours]"
     echo ""
