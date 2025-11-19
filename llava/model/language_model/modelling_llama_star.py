@@ -470,9 +470,39 @@ class STARVLMModel(LlamaModel):
 
                     device = hidden_states.device
 
-                    # STAR-V2/V3: Multi-text-token guidance (inspired by SparseVLM)
-                    # Unlike PDrop which only uses last token, we identify important text tokens
-                    if self.mode in ["star_v2", "star_v3"]:
+                    # ========== Stage 2 Text Aggregation Strategy ==========
+                    # Read text aggregation mode from environment (for ablation study)
+                    # Options: last_token, multi_token (default), average_all
+                    text_agg_mode = os.environ.get('TEXT_AGG_MODE', 'multi_token')
+
+                    # Average across heads: (B, seq_len, seq_len)
+                    attn_avg = layer_attention.mean(dim=1)  # (B, seq_len, seq_len)
+
+                    if text_agg_mode == 'last_token':
+                        # Baseline: Use only last token attention (PDrop-style)
+                        visual_attention = attn_avg[0, -1, visual_start:visual_end]  # (N_vis,)
+
+                        if enable_debug:
+                            print(f"[{mode_name}] Last-token-only guidance - Visual attention stats: "
+                                  f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
+                                  f"max={visual_attention.max():.4f}")
+
+                    elif text_agg_mode == 'average_all':
+                        # Baseline: Average all text tokens without importance filtering
+                        seq_length = hidden_states.shape[1]
+                        num_text_tokens = seq_length - visual_end
+                        all_text_to_visual_attn = attn_avg[0, visual_end:, visual_start:visual_end]  # (N_text, N_vis)
+                        visual_attention = all_text_to_visual_attn.mean(dim=0)  # (N_vis,)
+
+                        if enable_debug:
+                            print(f"[{mode_name}] Average-all ({num_text_tokens} tokens) guidance - Visual attention stats: "
+                                  f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
+                                  f"max={visual_attention.max():.4f}")
+
+                    else:  # text_agg_mode == 'multi_token' (default, our method)
+                        # Our method: Multi-text-token guidance (inspired by SparseVLM)
+                        # Unlike PDrop which only uses last token, we identify important text tokens
+
                         # Extract visual and text hidden states
                         visual_hidden = hidden_states[:, visual_start:visual_end]  # (B, N_vis, D)
                         text_hidden = hidden_states[:, visual_end:]  # (B, N_text, D)
@@ -498,10 +528,6 @@ class STARVLMModel(LlamaModel):
                         if enable_debug:
                             print(f"[{mode_name}] Using {len(text_rater_indices)} text rater tokens (out of {len(text_importance)} text tokens)")
 
-                        # Aggregate attention from text raters to visual tokens
-                        # Average across heads: (B, seq_len, seq_len)
-                        attn_avg = layer_attention.mean(dim=1)  # (B, seq_len, seq_len)
-
                         # Get attention from text raters to visual region
                         # Offset text_rater_indices to account for visual tokens
                         text_rater_positions = text_rater_indices + visual_end
@@ -513,16 +539,7 @@ class STARVLMModel(LlamaModel):
                         visual_attention = rater_to_visual_attn.mean(dim=0)  # (N_vis,)
 
                         if enable_debug:
-                            print(f"[{mode_name}] Multi-token text guidance - Visual attention stats: "
-                                  f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
-                                  f"max={visual_attention.max():.4f}")
-                    else:
-                        # STAR (original): Use last token attention (PDrop-style)
-                        attn_avg = layer_attention.mean(dim=1)  # (B, seq_len, seq_len)
-                        visual_attention = attn_avg[0, -1, visual_start:visual_end]  # (N_vis,)
-
-                        if enable_debug:
-                            print(f"[{mode_name}] Single-token text guidance - Visual attention stats: "
+                            print(f"[{mode_name}] Multi-token guidance - Visual attention stats: "
                                   f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
                                   f"max={visual_attention.max():.4f}")
 
