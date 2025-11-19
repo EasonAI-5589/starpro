@@ -55,31 +55,33 @@ export TOP_K_TOKENS=10  # Same K as top_k
 ```
 
 ### 3. Top-K Tokens (Baseline)
-**Implementation:** Fixed number of most important tokens
+**Implementation:** Fixed top-K tokens based on attention scores
 ```python
-# Step 1: Compute text importance via text-visual similarity
-text_visual_sim = torch.matmul(text_hidden, visual_hidden.transpose(1, 2))
-text_importance = text_visual_sim.softmax(dim=0).mean(dim=1)
+# Step 1: Get text-to-visual attention scores
+text_to_visual_attn = attn_avg[0, visual_end:, visual_start:visual_end]  # (N_text, N_vis)
 
-# Step 2: Select fixed top-K tokens (e.g., K=3)
-K = int(os.environ.get('TOP_K_TOKENS', '3'))
+# Step 2: Compute importance as mean attention to visual tokens
+text_importance = text_to_visual_attn.mean(dim=1)  # (N_text,)
+
+# Step 3: Select fixed top-K tokens by attention scores
+K = int(os.environ.get('TOP_K_TOKENS', '10'))
 topk_indices = text_importance.topk(K).indices
 
-# Step 3: Average attention from top-K tokens
+# Step 4: Average attention from top-K tokens
 topk_to_visual_attn = attn_avg[0, topk_positions, visual_start:visual_end]
 visual_attention = topk_to_visual_attn.mean(dim=0)
 ```
 
 **Characteristics:**
-- Uses a fixed number of top-K most important tokens
-- More selective than last-token, more tokens than single token
-- Fixed K may not adapt to query complexity (some queries need more/fewer tokens)
-- Still identifies important tokens but lacks adaptivity
+- Simple method: uses attention scores directly
+- Selects K tokens with highest attention to visual region
+- Fixed K regardless of query complexity
+- More straightforward than similarity-based methods
 
 **Usage:**
 ```bash
 export TEXT_AGG_MODE=top_k
-export TOP_K_TOKENS=3  # Configurable K value
+export TOP_K_TOKENS=10  # Configurable K value
 ```
 
 ### 4. Multi-Token Guidance [Ours] (Default)
