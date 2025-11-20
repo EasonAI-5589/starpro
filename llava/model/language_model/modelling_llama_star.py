@@ -53,7 +53,7 @@ STAR_V3_SCHEDULE = {
     "7b": {
         # Pad mode targets (user passes T, actual target = T)
         192: [(8, 192), (16, 144), (24, 96)],      # Stage 1: 384 → Avg = 192.0
-        128: [(12, 64), (24, 32)],                 # Stage 1: 256 → Avg = 128.0 (aggressive pruning)
+        128: [(12, 64), (24, 32)],                 # Stage 1: 256 → Avg = 128.0 (progressive front-heavy)
         64: [(12, 32), (24, 16)],                  # Stage 1: 128 → Avg = 64.0
         32: [(12, 16), (24, 8)],                   # Stage 1: 64 → Avg = 32.0
         # Anyres mode targets (user passes T, actual target = T*5)
@@ -133,6 +133,41 @@ STAR_V5_SCHEDULE = {
     }
 }
 
+# STAR-V3 Alternative Schedules for Ablation Study
+# These schedules are used to compare different pruning strategies
+# All schedules maintain the same average token count (e.g., 128) for fair comparison
+
+# Single-stage pruning: Prune at only 2 specific layers
+STAR_V3_SINGLE_STAGE_SCHEDULE = {
+    "7b": {
+        128: [(2, 64), (10, 32)],                  # Stage 1: 256 → Avg = 128.0 (single-stage at layers 2, 10)
+        # Verify: (256*2 + 64*8 + 32*22) / 32 = (512 + 512 + 704) / 32 = 128.0 ✓
+        # Layer 0-1: 256 tokens (2 layers)
+        # Layer 2-9: 64 tokens (8 layers)
+        # Layer 10-31: 32 tokens (22 layers)
+    },
+    "13b": {
+        128: [(2, 96), (12, 32)],                  # Stage 1: 256 → Avg = 128.0 (single-stage at layers 2, 12)
+        # Verify: (256*2 + 96*10 + 32*28) / 40 = (512 + 960 + 896) / 40 = 128.0 ✓
+    }
+}
+
+# Uniform progressive pruning: More gradual and uniform distribution
+STAR_V3_UNIFORM_SCHEDULE = {
+    "7b": {
+        128: [(10, 128), (20, 64), (28, 32)],      # Stage 1: 256 → Avg = 128.0 (uniform progressive)
+        # Verify: (256*10 + 128*10 + 64*8 + 32*4) / 32 = (2560 + 1280 + 512 + 128) / 32 = 128.0 ✓
+        # Layer 0-9: 256 tokens (10 layers)
+        # Layer 10-19: 128 tokens (10 layers)
+        # Layer 20-27: 64 tokens (8 layers)
+        # Layer 28-31: 32 tokens (4 layers)
+    },
+    "13b": {
+        128: [(10, 160), (20, 96), (30, 64), (36, 32)],  # Stage 1: 256 → Avg = 128.0 (uniform progressive)
+        # Verify: (256*10 + 160*10 + 96*10 + 64*6 + 32*4) / 40 = (2560 + 1600 + 960 + 384 + 128) / 40 = 128.0 ✓
+    }
+}
+
 class STARVLMModel(LlamaModel):
     """
     STAR-VLM: Multi-Layer Progressive Pruning with Attention-based Importance Scoring
@@ -177,8 +212,32 @@ class STARVLMModel(LlamaModel):
             # STAR-V3: Two-stage mode with adaptive schedule (Stage 1 gives target*2)
             # Note: User should pass T=128 for pad, T=640 for anyres (manually adjusted)
             self.visual_token_length = self.target_visual_tokens * 2
-            self.pruning_schedule = STAR_V3_SCHEDULE[self.scale][self.target_visual_tokens]
+
+            # Stage 2 Pruning Schedule Ablation Support
+            # Priority: custom schedule > environment variable > default
             import os
+            import json
+
+            # Check if custom schedule is provided via environment variable
+            custom_schedule_str = os.environ.get('CUSTOM_PRUNING_SCHEDULE', None)
+            if custom_schedule_str:
+                # Parse custom schedule from JSON string
+                # Example: CUSTOM_PRUNING_SCHEDULE='[(2, 64), (10, 32)]'
+                self.pruning_schedule = json.loads(custom_schedule_str)
+                schedule_name = f"Custom: {self.pruning_schedule}"
+            else:
+                # Use predefined schedules
+                pruning_schedule_mode = os.environ.get('PRUNING_SCHEDULE_MODE', 'progressive')
+                if pruning_schedule_mode == 'single_stage':
+                    self.pruning_schedule = STAR_V3_SINGLE_STAGE_SCHEDULE[self.scale][self.target_visual_tokens]
+                    schedule_name = "Single-stage (layers 2, 10)"
+                elif pruning_schedule_mode == 'uniform':
+                    self.pruning_schedule = STAR_V3_UNIFORM_SCHEDULE[self.scale][self.target_visual_tokens]
+                    schedule_name = "Uniform progressive"
+                else:  # 'progressive' (default)
+                    self.pruning_schedule = STAR_V3_SCHEDULE[self.scale][self.target_visual_tokens]
+                    schedule_name = "Progressive front-heavy (default)"
+
             if os.environ.get('ENABLE_DEBUG', '0') == '1':
                 print(f"[STAR-V3 Stage 2] Initialized")
                 print(f"  Scale: {self.scale}")
@@ -187,6 +246,8 @@ class STARVLMModel(LlamaModel):
                 print(f"  Expected input from Stage 1: {self.visual_token_length} tokens (T × 2)")
                 print(f"  Stage 1 method: THCP (adaptive to target)")
                 print(f"  Target tokens: {self.target_visual_tokens}")
+                print(f"  Pruning schedule: {schedule_name}")
+                print(f"  Schedule: {self.pruning_schedule}")
         elif self.mode == "star_v5":
             # STAR-V5: S2 Only ablation (Stage 1 skipped, progressive pruning only)
             # Stage 1 (llava_arch) skips THCP and keeps all 576 (or 2880) tokens
