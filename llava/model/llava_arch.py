@@ -1255,16 +1255,15 @@ class LlavaMetaForCausalLM(ABC):
 
             # ========== 超参数配置（与THCP一致，使用Lambda） ==========
             # Stage 1 (THCP) Lambda Ablation Support
-            # Formula: L_i(S) = 0.5 × R_i + (λ/2) × D_i(S)
-            # Fixed relevance weight = 0.5, diversity weight = λ/2
-            # λ=0.5 → 0.5R+0.25D, λ=1.0 → 0.5R+0.5D, λ=2.0 → 0.5R+1.0D
+            # Formula: L_i(S) = R_i + λ × D_i(S)
+            # λ=0.5 → R+0.5D, λ=1.0 → R+1.0D, λ=2.0 → R+2.0D
             import os
             lambda_val = float(os.environ.get('LAMBDA', '1.0'))
 
-            # Fixed relevance weight + variable diversity weight (λ/2)
-            coverage_weight = 0.5              # Fixed 0.5 for coverage in M>1 mode
-            relevance_weight = 0.5             # Fixed 0.5 for relevance in M=1 mode
-            diversity_weight = lambda_val / 2.0  # λ/2 for diversity in both modes
+            # Paper's original formula: R + λD
+            coverage_weight = 1.0              # Relevance/Coverage weight (fixed at 1.0)
+            relevance_weight = 1.0             # Relevance weight in M=1 mode (fixed at 1.0)
+            diversity_weight = lambda_val      # Diversity weight = λ
 
             M = text_embeds.shape[0]
             text_normalized = text_embeds / (text_embeds.norm(dim=-1, keepdim=True) + 1e-8)

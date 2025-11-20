@@ -10,7 +10,7 @@ METHOD="star_v3"
 TOKEN_BUDGET=128
 
 # Fixed lambda from Stage 1 ablation
-LAMBDA=0.5
+LAMBDA=1.0
 
 # Text aggregation modes to test
 TEXT_AGG_MODES=(last_token random top_k multi_token)

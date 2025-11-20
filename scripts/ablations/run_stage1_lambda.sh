@@ -1,8 +1,8 @@
 #!/bin/bash
 # ==================== Configuration ====================
 # Stage 1 (THCP) Lambda Ablation Study
-# Formula: L_i(S) = 0.5 × R_i + (λ/2) × D_i(S)
-# Fixed relevance weight = 0.5, diversity weight = λ/2
+# Formula: L_i(S) = R_i + λ × D_i(S)
+# Fixed relevance weight = 1.0, diversity weight = λ
 
 # Model configuration
 MODEL_VERSION="v1_5"
@@ -11,9 +11,9 @@ METHOD="star_v3"
 TOKEN_BUDGET=128
 
 # Lambda values to test
-# λ=0.5 → Diversity=0.25 (0.5R+0.25D)
-# λ=1.0 → Diversity=0.5  (0.5R+0.5D, balanced)
-# λ=2.0 → Diversity=1.0  (0.5R+1.0D)
+# λ=0.5 → R+0.5D (relevance-heavy)
+# λ=1.0 → R+1.0D (balanced)
+# λ=2.0 → R+2.0D (diversity-heavy)
 LAMBDA_VALUES=(1.0)
 
 # Evaluation tasks
@@ -46,9 +46,9 @@ echo ""
     echo "  Model: llava-${MODEL_VERSION}-${MODEL_SCALE}"
     echo "  Method: ${METHOD}"
     echo "  Token Budget: ${TOKEN_BUDGET}"
-    echo "  Formula: L_i(S) = 0.5 × R_i + (λ/2) × D_i(S)"
-    echo "  Fixed Relevance Weight: 0.5"
-    echo "  Diversity Weight: λ/2"
+    echo "  Formula: L_i(S) = R_i + λ × D_i(S)"
+    echo "  Fixed Relevance Weight: 1.0"
+    echo "  Diversity Weight: λ"
     echo ""
     echo "Lambda values: ${LAMBDA_VALUES[@]}"
     echo "Benchmarks: ${TASKS[@]}"
@@ -60,13 +60,11 @@ echo ""
 
 # ==================== Run Evaluations ====================
 for lambda in "${LAMBDA_VALUES[@]}"; do
-    diversity_weight=$(awk "BEGIN {print $lambda/2}")
-
     {
         echo "=========================================="
         echo ">>> Lambda: $lambda"
-        echo ">>> Diversity Weight: $diversity_weight (λ/2)"
-        echo ">>> Formula: L_i(S) = 0.5 × R_i + $diversity_weight × D_i(S)"
+        echo ">>> Diversity Weight: $lambda (λ)"
+        echo ">>> Formula: L_i(S) = R_i + $lambda × D_i(S)"
         echo "=========================================="
     } | tee -a "${LOG_FILE}"
 
@@ -83,7 +81,7 @@ for lambda in "${LAMBDA_VALUES[@]}"; do
 
     {
         echo ""
-        echo ">>> ✓ Finished Lambda = $lambda (Diversity Weight = $diversity_weight)"
+        echo ">>> ✓ Finished Lambda = $lambda (Diversity Weight = $lambda)"
         echo ""
     } | tee -a "${LOG_FILE}"
 done

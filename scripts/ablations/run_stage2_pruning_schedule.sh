@@ -10,7 +10,7 @@ METHOD="star_v3"
 TOKEN_BUDGET=128
 
 # Fixed lambda from Stage 1 ablation
-LAMBDA=0.5
+LAMBDA=1.0
 
 # Pruning schedule configurations to test
 # Format: "name|mode|custom_schedule"
