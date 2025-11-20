@@ -1,7 +1,8 @@
 #!/bin/bash
 # ==================== Configuration ====================
 # Stage 1 (THCP) Lambda Ablation Study
-# Formula: L_i(S) = (1-λ)R_i + λD_i(S)
+# Formula: L_i(S) = 0.5 × R_i + (λ/2) × D_i(S)
+# Fixed relevance weight = 0.5, diversity weight = λ/2
 
 # Model configuration
 MODEL_VERSION="v1_5"
@@ -10,7 +11,10 @@ METHOD="star_v3"
 TOKEN_BUDGET=128
 
 # Lambda values to test
-LAMBDA_VALUES=(0.5)
+# λ=0.5 → Diversity=0.25 (0.5R+0.25D)
+# λ=1.0 → Diversity=0.5  (0.5R+0.5D, balanced)
+# λ=2.0 → Diversity=1.0  (0.5R+1.0D)
+LAMBDA_VALUES=(1.0)
 
 # Evaluation tasks
 TASKS=(mme)
@@ -42,7 +46,9 @@ echo ""
     echo "  Model: llava-${MODEL_VERSION}-${MODEL_SCALE}"
     echo "  Method: ${METHOD}"
     echo "  Token Budget: ${TOKEN_BUDGET}"
-    echo "  Formula: L_i(S) = (1-λ)R_i + λD_i(S)"
+    echo "  Formula: L_i(S) = 0.5 × R_i + (λ/2) × D_i(S)"
+    echo "  Fixed Relevance Weight: 0.5"
+    echo "  Diversity Weight: λ/2"
     echo ""
     echo "Lambda values: ${LAMBDA_VALUES[@]}"
     echo "Benchmarks: ${TASKS[@]}"
@@ -54,11 +60,13 @@ echo ""
 
 # ==================== Run Evaluations ====================
 for lambda in "${LAMBDA_VALUES[@]}"; do
-    relevance=$(awk "BEGIN {print 1-$lambda}")
+    diversity_weight=$(awk "BEGIN {print $lambda/2}")
 
     {
         echo "=========================================="
-        echo ">>> Lambda: $lambda (Relevance=$relevance, Diversity=$lambda)"
+        echo ">>> Lambda: $lambda"
+        echo ">>> Diversity Weight: $diversity_weight (λ/2)"
+        echo ">>> Formula: L_i(S) = 0.5 × R_i + $diversity_weight × D_i(S)"
         echo "=========================================="
     } | tee -a "${LOG_FILE}"
 
@@ -75,7 +83,7 @@ for lambda in "${LAMBDA_VALUES[@]}"; do
 
     {
         echo ""
-        echo ">>> ✓ Finished Lambda=$lambda (Relevance=$relevance, Diversity=$lambda)"
+        echo ">>> ✓ Finished Lambda = $lambda (Diversity Weight = $diversity_weight)"
         echo ""
     } | tee -a "${LOG_FILE}"
 done
