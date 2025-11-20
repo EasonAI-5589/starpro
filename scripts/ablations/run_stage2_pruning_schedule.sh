@@ -17,17 +17,31 @@ LAMBDA=0.5
 # - name: Display name for the schedule
 # - mode: predefined mode (progressive/single_stage/uniform) or "custom"
 # - custom_schedule: JSON array (only used if mode="custom")
-SCHEDULE_CONFIGS=(
-    "Progressive (Front-heavy) [Ours]|progressive|"
-    "Single-stage (Layers 2, 10)|single_stage|"
-    "Uniform Progressive|uniform|"
-)
 
-# Example custom schedules (uncomment to test):
-# SCHEDULE_CONFIGS+=(
-#     "Custom Example 1|custom|[[2, 64], [10, 32]]"
-#     "Custom Example 2|custom|[[8, 96], [16, 48], [24, 32]]"
-# )
+# ===== Pruning Schedule Configurations =====
+# Format: "Display Name|custom|[[layer1, tokens1], [layer2, tokens2], ...]"
+#
+# Schedule syntax:
+#   [(layer_idx, tokens)] - Single-stage pruning
+#   [(layer1, tokens1), (layer2, tokens2)] - Two-stage pruning
+#   [(layer1, tokens1), (layer2, tokens2), (layer3, tokens3)] - Three-stage pruning
+#
+# Example calculations for average = 128:
+#   Two-stage [(12, 64), (24, 32)]:
+#     Layers 0-11: 256 tokens (12 layers)
+#     Layers 12-23: 64 tokens (12 layers)
+#     Layers 24-31: 32 tokens (8 layers)
+#     Average: (12×256 + 12×64 + 8×32) / 32 = 128.0 ✓
+
+SCHEDULE_CONFIGS=(
+    # TODO: 在这里填入你的自定义配置
+    # 示例:
+    # "Single-stage|custom|[[16, 32]]"
+    # "Two-stage [Ours]|custom|[[12, 64], [24, 32]]"
+    # "Three-stage|custom|[[8, 128], [18, 72], [26, 32]]"
+
+    "Two-stage [STAR, Ours]|custom|[[12, 64], [24, 32]]"
+)
 
 # Evaluation tasks
 TASKS=(mme)
