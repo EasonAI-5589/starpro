@@ -43,13 +43,13 @@ STAR_V2_SCHEDULE = {
     }
 }
 
-# STAR-V3 Two-Stage Pruning Schedule (Adaptive)
+# STAR-PRO Two-Stage Pruning Schedule (Adaptive)
 # Stage 1 (llava_arch): 576 -> target*2 (THCP pruning, adaptive to target)
 # Stage 2 (here): target*2 -> target (text-guided progressive pruning)
 # Goal: Average tokens across all layers = target budget (exact)
 # Strategy: 2-3 pruning steps with front-heavy distribution (more tokens in early layers)
 # Note: For anyres mode, target is automatically multiplied by 5 in __init__
-STAR_V3_SCHEDULE = {
+STAR_PRO_SCHEDULE = {
     "7b": {
         # Pad mode targets (user passes T, actual target = T)
         192: [(8, 192), (16, 144), (24, 96)],      # Stage 1: 384 → Avg = 192.0
@@ -133,12 +133,12 @@ STAR_V5_SCHEDULE = {
     }
 }
 
-# STAR-V3 Alternative Schedules for Ablation Study
+# STAR-PRO Alternative Schedules for Ablation Study
 # These schedules are used to compare different pruning strategies
 # All schedules maintain the same average token count (e.g., 128) for fair comparison
 
 # Single-stage pruning: Prune at only 2 specific layers
-STAR_V3_SINGLE_STAGE_SCHEDULE = {
+STAR_PRO_SINGLE_STAGE_SCHEDULE = {
     "7b": {
         128: [(2, 64), (10, 32)],                  # Stage 1: 256 → Avg = 128.0 (single-stage at layers 2, 10)
         # Verify: (256*2 + 64*8 + 32*22) / 32 = (512 + 512 + 704) / 32 = 128.0 ✓
@@ -153,7 +153,7 @@ STAR_V3_SINGLE_STAGE_SCHEDULE = {
 }
 
 # Uniform progressive pruning: More gradual and uniform distribution
-STAR_V3_UNIFORM_SCHEDULE = {
+STAR_PRO_UNIFORM_SCHEDULE = {
     "7b": {
         128: [(10, 128), (20, 64), (28, 32)],      # Stage 1: 256 → Avg = 128.0 (uniform progressive)
         # Verify: (256*10 + 128*10 + 64*8 + 32*4) / 32 = (2560 + 1280 + 512 + 128) / 32 = 128.0 ✓
@@ -205,11 +205,11 @@ class STARVLMModel(LlamaModel):
 
         # Config
         self.target_visual_tokens = starvlm_config["T"]
-        self.mode = starvlm_config.get("mode", "star")  # "star", "star_v2", or "star_v3"
+        self.mode = starvlm_config.get("mode", "star")  # "star", "star_v2", or "star_pro"
 
         # Load pruning schedule based on mode
-        if self.mode == "star_v3":
-            # STAR-V3: Two-stage mode with adaptive schedule (Stage 1 gives target*2)
+        if self.mode == "star_pro":
+            # STAR-PRO: Two-stage mode with adaptive schedule (Stage 1 gives target*2)
             # Note: User should pass T=128 for pad, T=640 for anyres (manually adjusted)
             self.visual_token_length = self.target_visual_tokens * 2
 
@@ -229,17 +229,17 @@ class STARVLMModel(LlamaModel):
                 # Use predefined schedules
                 pruning_schedule_mode = os.environ.get('PRUNING_SCHEDULE_MODE', 'progressive')
                 if pruning_schedule_mode == 'single_stage':
-                    self.pruning_schedule = STAR_V3_SINGLE_STAGE_SCHEDULE[self.scale][self.target_visual_tokens]
+                    self.pruning_schedule = STAR_PRO_SINGLE_STAGE_SCHEDULE[self.scale][self.target_visual_tokens]
                     schedule_name = "Single-stage (layers 2, 10)"
                 elif pruning_schedule_mode == 'uniform':
-                    self.pruning_schedule = STAR_V3_UNIFORM_SCHEDULE[self.scale][self.target_visual_tokens]
+                    self.pruning_schedule = STAR_PRO_UNIFORM_SCHEDULE[self.scale][self.target_visual_tokens]
                     schedule_name = "Uniform progressive"
                 else:  # 'progressive' (default)
-                    self.pruning_schedule = STAR_V3_SCHEDULE[self.scale][self.target_visual_tokens]
+                    self.pruning_schedule = STAR_PRO_SCHEDULE[self.scale][self.target_visual_tokens]
                     schedule_name = "Progressive front-heavy (default)"
 
             if os.environ.get('ENABLE_DEBUG', '0') == '1':
-                print(f"[STAR-V3 Stage 2] Initialized")
+                print(f"[STAR-PRO Stage 2] Initialized")
                 print(f"  Scale: {self.scale}")
                 print(f"  Aspect ratio: {'anyres' if self.anyres else 'pad'}")
                 print(f"  User passed T: {starvlm_config['T']}")
@@ -322,7 +322,7 @@ class STARVLMModel(LlamaModel):
         # ============ DEBUG: 追踪序列长度来源 ============
         if enable_debug and past_key_values is None:  # 只在 prefill 阶段打印
             print("\n" + "="*80)
-            print("🔍 [STAR-V3 DEBUG] Forward Input Analysis")
+            print("🔍 [STAR-PRO DEBUG] Forward Input Analysis")
             print("="*80)
             
             # 1. 检查输入来源
@@ -441,8 +441,8 @@ class STARVLMModel(LlamaModel):
             self.visual_token_indices = torch.arange(actual_visual_length, device=hidden_states.device)
             self.prefill_done = True
 
-            if self.mode == "star_v3":
-                mode_name = "STAR-V3 Stage 2"
+            if self.mode == "star_pro":
+                mode_name = "STAR-PRO Stage 2"
             elif self.mode == "star_v2":
                 mode_name = "STAR-V2 Stage 2"
             elif self.mode == "star_v5":
@@ -494,8 +494,8 @@ class STARVLMModel(LlamaModel):
                     visual_start = self.system_prompt_length
                     visual_end = visual_start + self.current_visual_length
 
-                    if self.mode == "star_v3":
-                        mode_name = "STAR-V3 Stage 2"
+                    if self.mode == "star_pro":
+                        mode_name = "STAR-PRO Stage 2"
                     elif self.mode == "star_v2":
                         mode_name = "STAR-V2 Stage 2"
                     elif self.mode == "star_v5":

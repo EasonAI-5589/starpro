@@ -39,7 +39,7 @@ The STAR-Pro framework consists of two complementary stages:
 | ---------------------- | --------------- | --------------------- | ------------------ |
 | **S1 Only**      | ✅ 576 → 128   | ❌ Disabled           | `thcp` method    |
 | **S2 Only**      | ❌ Keep all 576 | ✅ 576 → 128         | `star_v5` method |
-| **S1+S2 (Full)** | ✅ 576 → 256   | ✅ 256 → 128         | `star_v3` method |
+| **S1+S2 (Full)** | ✅ 576 → 256   | ✅ 256 → 128         | `star_pro` method |
 
 ---
 
@@ -161,11 +161,11 @@ STAR_V5_SCHEDULE = {
 
 ### Stage 1+2 Full (STAR-Pro)
 
-**Method**: `star_v3`
+**Method**: `star_pro`
 **Configuration**:
 
 ```python
-pruning_method = "star_v3"
+pruning_method = "star_pro"
 visual_token_num = 128
 ```
 
@@ -456,13 +456,13 @@ bash scripts/v1_6/7b/textvqa.sh thcp 128
 
 ```bash
 # POPE
-bash scripts/v1_6/7b/pope.sh star_v3 128
+bash scripts/v1_6/7b/pope.sh star_pro 128
 
 # MME
-bash scripts/v1_6/7b/mme.sh star_v3 128
+bash scripts/v1_6/7b/mme.sh star_pro 128
 
 # TextVQA
-bash scripts/v1_6/7b/textvqa.sh star_v3 128
+bash scripts/v1_6/7b/textvqa.sh star_pro 128
 ```
 
 ### Batch Runner
@@ -551,7 +551,7 @@ bash scripts/ablations/run_all_ablations.sh
 - STAR-V5 implementation: `llava/model/language_model/modelling_llama_star.py`
 - THCP implementation: `llava/model/llava_arch.py`
 - Evaluation script: `llava/eval/model_vqa_loader.py`
-- Schedules: `STAR_V5_SCHEDULE`, `STAR_V3_SCHEDULE`
+- Schedules: `STAR_V5_SCHEDULE`, `STAR_PRO_SCHEDULE`
 
 ---
 

@@ -14,7 +14,7 @@ Usage:
         --question-file /path/to/questions.jsonl \
         --image-folder /path/to/images \
         --answers-file /path/to/output.jsonl \
-        --pruning_method star_v3 \
+        --pruning_method star_pro \
         --visual_token_num 128 \
         --output-json performance_report.json
 """
@@ -174,16 +174,16 @@ def benchmark_performance(args):
     use_pdrop = True if args.pruning_method == "pdrop" else False
     pdrop_config = {"T": args.visual_token_num}
 
-    use_star = True if args.pruning_method in ["star", "star_v2", "star_v3"] else False
+    use_star = True if args.pruning_method in ["star", "star_v2", "star_pro"] else False
     star_config = {
         "T": args.visual_token_num,
         "num_latent": args.num_latent,
         "latent_pool_size": (args.latent_pool_h, args.latent_pool_w),
-        "mode": "star_v3" if args.pruning_method == "star_v3" else ("star_v2" if args.pruning_method == "star_v2" else "star"),
+        "mode": "star_pro" if args.pruning_method == "star_pro" else ("star_v2" if args.pruning_method == "star_v2" else "star"),
         "debug": False,  # Disable debug prints for benchmarking
     }
 
-    use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method or args.pruning_method == "star_v3" else False
+    use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method or args.pruning_method == "star_pro" else False
 
     print(f"\n{'='*70}")
     print(f"Performance Benchmarking for STAR-LLaVA")
@@ -413,7 +413,7 @@ if __name__ == "__main__":
 
     # Pruning arguments
     parser.add_argument("--pruning_method", type=str, default=None,
-                        help="Pruning method: fastv, sparsevlm, pdrop, star, star_v2, star_v3")
+                        help="Pruning method: fastv, sparsevlm, pdrop, star, star_v2, star_pro")
     parser.add_argument("--visual_token_num", type=int, default=576,
                         help="Target number of visual tokens")
 

@@ -133,7 +133,7 @@ export TEXT_AGG_MODE=average_all
 
 ### Configuration
 - **Model:** LLaVA-1.5-7B
-- **Method:** star_v3 (Stage 1 + Stage 2 full pipeline)
+- **Method:** star_pro (Stage 1 + Stage 2 full pipeline)
 - **Token Budget:** T = 128
 - **Lambda:** λ = 0.5 (fixed, from Stage 1 ablation)
 - **Benchmarks:** MME, GQA, POPE, TextVQA
@@ -200,7 +200,7 @@ else:  # 'multi_token'
 This ablation is inspired by:
 - **PDrop** (Yin et al., 2024): Uses last-token attention
 - **SparseVLM** (Yuan et al., 2024): Multi-token approach for encoder-decoder models
-- **STAR-V3** (This work): Adapted multi-token guidance for decoder-only LVLMs
+- **STAR-PRO** (This work): Adapted multi-token guidance for decoder-only LVLMs
 
 ## Citation
 

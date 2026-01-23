@@ -6,7 +6,7 @@
 # Model configuration
 MODEL_VERSION="v1_5"
 MODEL_SCALE="7b"
-METHOD="star_v3"
+METHOD="star_pro"
 TOKEN_BUDGET=128
 
 # Fixed lambda from Stage 1 ablation

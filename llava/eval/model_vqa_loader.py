@@ -99,16 +99,16 @@ def eval_model(args):
     pdrop_config = {"T": args.visual_token_num}
     
     # ⭐ STAR Configuration
-    use_star = True if args.pruning_method in ["star", "star_v2", "star_v3", "star_v5"] else False
+    use_star = True if args.pruning_method in ["star", "star_v2", "star_pro", "star_v5"] else False
     star_config = {
         "T": args.visual_token_num,  # Target visual tokens (64/128/192)
         "num_latent": args.num_latent,  # Number of latent tokens (default: 20)
         "latent_pool_size": (args.latent_pool_h, args.latent_pool_w),  # Grid size (default: 5x4)
-        "mode": "star_v5" if args.pruning_method == "star_v5" else ("star_v3" if args.pruning_method == "star_v3" else ("star_v2" if args.pruning_method == "star_v2" else "star")),  # STAR-V5/V3/V2/V1
+        "mode": "star_v5" if args.pruning_method == "star_v5" else ("star_pro" if args.pruning_method == "star_pro" else ("star_v2" if args.pruning_method == "star_v2" else "star")),  # STAR-V5/V3/V2/V1
         "debug": False,  # Set to True for debugging, False for performance testing
     }
     
-    use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method or args.pruning_method == "star_v3" else False
+    use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method or args.pruning_method == "star_pro" else False
     
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,

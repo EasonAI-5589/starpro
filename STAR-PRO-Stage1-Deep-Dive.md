@@ -1,8 +1,8 @@
-# STAR-V3 Stage 1: Text-Concept Hierarchical Coverage Pruning (THCP)
+# STAR-PRO Stage 1: Text-Concept Hierarchical Coverage Pruning (THCP)
 
 ## Executive Summary
 
-STAR-V3 的 Stage 1 采用 **THCP (Text-Concept Hierarchical Coverage Pruning)** 算法，这是一个**基于文本语义覆盖的贪心剪枝策略**，在视觉特征进入大语言模型（LLM）之前执行。与传统的单一token指导或固定比例剪枝不同，THCP 根据文本问题的复杂度**自适应**地选择视觉tokens，确保保留的tokens能够**最大化覆盖文本中的关键概念**，同时保持**视觉多样性**。
+STAR-PRO 的 Stage 1 采用 **THCP (Text-Concept Hierarchical Coverage Pruning)** 算法，这是一个**基于文本语义覆盖的贪心剪枝策略**，在视觉特征进入大语言模型（LLM）之前执行。与传统的单一token指导或固定比例剪枝不同，THCP 根据文本问题的复杂度**自适应**地选择视觉tokens，确保保留的tokens能够**最大化覆盖文本中的关键概念**，同时保持**视觉多样性**。
 
 ### 核心特点
 
@@ -75,7 +75,7 @@ max_{S⊂V, |S|=K} ∑ⱼ wⱼ · max_{i∈S} R[i,j] + λ · Diversity(S)
 
 ### 1.2 THCP 与传统方法的对比
 
-| 维度 | FastV | TRIM | STAR-V2 | **THCP (STAR-V3)** |
+| 维度 | FastV | TRIM | STAR-V2 | **THCP (STAR-PRO)** |
 |------|-------|------|---------|-------------------|
 | **指导信号** | 单一last token | 文本-视觉相似度 | CLS attention | **多概念覆盖** |
 | **文本建模** | 1个token | 平均所有tokens | 不使用文本 | **每个token独立** |
@@ -605,12 +605,12 @@ stage1_keep_num = N // 2  # 2880 → 1440, 576 → 288
 #    - T大时：Stage 1可能过度保守
 ```
 
-### 3.2 STAR-V3 的 Adaptive Scheduling
+### 3.2 STAR-PRO 的 Adaptive Scheduling
 
 **核心思想**：Stage 1 根据**最终目标T**动态调整保留数量
 
 ```python
-# STAR-V3 Stage 1
+# STAR-PRO Stage 1
 stage1_keep_num = self.visual_token_num * 2  # T * 2
 
 # 优势：
@@ -643,7 +643,7 @@ stage1_keep_num = self.visual_token_num * 2  # T * 2
 # File: llava/model/llava_arch.py
 # Lines: 1246-1247
 
-# 🔥 STAR-V3 Adaptive: Stage 1 keeps target*2 tokens (not fixed 50%)
+# 🔥 STAR-PRO Adaptive: Stage 1 keeps target*2 tokens (not fixed 50%)
 stage1_keep_num = self.visual_token_num * 2
 # e.g., target=128 → keep 256, target=640 → keep 1280
 
@@ -659,7 +659,7 @@ print(f"  Final target: {self.visual_token_num}")
 |-------------|----------------|-------------|------|
 | 固定50% (1440) | 77.1 | 60.5 | STAR-V2风格 |
 | 固定25% (720) | 76.3 | 59.7 | 过于激进 |
-| **Adaptive 2T (320)** | **77.8** | **61.2** | **STAR-V3** |
+| **Adaptive 2T (320)** | **77.8** | **61.2** | **STAR-PRO** |
 | Adaptive 1.5T (240) | 77.4 | 60.8 | Stage 2压力太大 |
 | Adaptive 3T (480) | 77.6 | 61.0 | Stage 1过于保守 |
 
@@ -920,7 +920,7 @@ selected_features: (5, 64, 4096) per patch → reshape后(1, 320, 4096)
 
 ```python
 # File: llava/model/llava_arch.py
-# Function: encode_images (STAR-V3部分)
+# Function: encode_images (STAR-PRO部分)
 
 def encode_images(self, images):
     # 1. Vision Encoding
@@ -1498,7 +1498,7 @@ plt.show()
 
 ### 核心贡献
 
-STAR-V3 的 Stage 1 (THCP) 是一个**文本概念导向的贪心剪枝算法**，具有以下核心创新：
+STAR-PRO 的 Stage 1 (THCP) 是一个**文本概念导向的贪心剪枝算法**，具有以下核心创新：
 
 1. **Text-Concept Coverage Paradigm**
    - 将剪枝转化为概念覆盖优化问题

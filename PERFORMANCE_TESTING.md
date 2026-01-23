@@ -24,7 +24,7 @@ python llava/eval/benchmark_performance.py \
     --question-file /path/to/pope/questions.jsonl \
     --image-folder /path/to/coco/val2014 \
     --answers-file ./outputs/pope_answers.jsonl \
-    --pruning_method star_v3 \
+    --pruning_method star_pro \
     --visual_token_num 128 \
     --warmup_samples 50 \
     --num_samples 1000 \
@@ -77,7 +77,7 @@ python llava/eval/model_vqa_loader.py \
     --question-file /path/to/pope/questions.jsonl \
     --image-folder /path/to/coco/val2014 \
     --answers-file ./outputs/pope_answers.jsonl \
-    --pruning_method star_v3 \
+    --pruning_method star_pro \
     --visual_token_num 128
 ```
 
@@ -96,7 +96,7 @@ python llava/eval/model_vqa_loader_accelerate.py \
     --question-file /path/to/pope/questions.jsonl \
     --image-folder /path/to/coco/val2014 \
     --answers-file /dev/null \
-    --pruning_method star_v3 \
+    --pruning_method star_pro \
     --visual_token_num 128
 ```
 
@@ -122,20 +122,20 @@ IMAGE_FOLDER=playground/data/eval/pope/val2014
 ### 完整示例
 
 ```bash
-# 测试 STAR-V3 (128 tokens)
+# 测试 STAR-PRO (128 tokens)
 python llava/eval/benchmark_performance.py \
     --model-path liuhaotian/llava-v1.6-vicuna-13b \
     --question-file playground/data/eval/pope/llava_pope_test.jsonl \
     --image-folder playground/data/eval/pope/val2014 \
-    --answers-file ./outputs/pope_star_v3_128.jsonl \
-    --pruning_method star_v3 \
+    --answers-file ./outputs/pope_star_pro_128.jsonl \
+    --pruning_method star_pro \
     --visual_token_num 128 \
     --num_latent 20 \
     --latent_pool_h 5 \
     --latent_pool_w 4 \
     --warmup_samples 50 \
     --num_samples 1000 \
-    --output-json ./performance_star_v3_128.json
+    --output-json ./performance_star_pro_128.json
 ```
 
 ## FLOPs 计算说明
@@ -158,25 +158,25 @@ FLOPs 使用以下公式动态计算（基于每层实际的视觉token数）：
 ### 测试不同 token budgets
 
 ```bash
-# STAR-V3 with different budgets
+# STAR-PRO with different budgets
 for TOKENS in 32 64 128 192; do
     python llava/eval/benchmark_performance.py \
         --model-path /path/to/model \
         --question-file playground/data/eval/pope/llava_pope_test.jsonl \
         --image-folder playground/data/eval/pope/val2014 \
-        --answers-file ./outputs/star_v3_${TOKENS}.jsonl \
-        --pruning_method star_v3 \
+        --answers-file ./outputs/star_pro_${TOKENS}.jsonl \
+        --pruning_method star_pro \
         --visual_token_num ${TOKENS} \
         --num_samples 1000 \
-        --output-json ./perf_star_v3_${TOKENS}.json
+        --output-json ./perf_star_pro_${TOKENS}.json
 done
 ```
 
 ### 测试不同方法
 
 ```bash
-# 对比 STAR, STAR-V2, STAR-V3
-for METHOD in star star_v2 star_v3; do
+# 对比 STAR, STAR-V2, STAR-PRO
+for METHOD in star star_v2 star_pro; do
     python llava/eval/benchmark_performance.py \
         --model-path /path/to/model \
         --question-file playground/data/eval/pope/llava_pope_test.jsonl \
@@ -199,7 +199,7 @@ done
   "model": {
     "name": "llava-v1.6-vicuna-13b",
     "path": "/path/to/model",
-    "pruning_method": "star_v3",
+    "pruning_method": "star_pro",
     "visual_token_budget": 128
   },
   "benchmark_config": {

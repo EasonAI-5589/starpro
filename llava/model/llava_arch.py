@@ -141,7 +141,7 @@ class LlavaMetaForCausalLM(ABC):
     def encode_images(self, images, texts=None):
         if 'prumerge' in self.pruning_method or self.pruning_method == 'visionzip' or self.pruning_method == 'fastervlm':
             image_features, image_attentions, image_keys, image_cls = self.get_model().get_vision_tower()(images, output_attentions=True)
-        elif self.pruning_method == 'trim' or self.pruning_method == 'cdp3' or 'thcp' in self.pruning_method or self.pruning_method == 'star_v3':
+        elif self.pruning_method == 'trim' or self.pruning_method == 'cdp3' or 'thcp' in self.pruning_method or self.pruning_method == 'star_pro':
             image_features, image_embeds, text_embeds = self.get_model().get_vision_tower()(images, texts=texts)
         else:
             image_features = self.get_model().get_vision_tower()(images)
@@ -1234,8 +1234,8 @@ class LlavaMetaForCausalLM(ABC):
             if enable_debug:
                 print(f"\n{'='*80}\n")
 
-        elif self.pruning_method == 'star_v3':
-            # STAR-V3: Two-Stage Framework with THCP Stage 1 (Adaptive)
+        elif self.pruning_method == 'star_pro':
+            # STAR-PRO: Two-Stage Framework with THCP Stage 1 (Adaptive)
             # Stage 1 (here): THCP pruning → keep target*2 tokens (adaptive to final target)
             # Stage 2 (in modeling_llama_star): Progressive pruning → target*2 → target
 
@@ -1246,7 +1246,7 @@ class LlavaMetaForCausalLM(ABC):
 
             if enable_debug:
                 print(f"\n{'='*80}")
-                print(f"STAR-V3 Stage 1: THCP Text-Concept Coverage (Adaptive)")
+                print(f"STAR-PRO Stage 1: THCP Text-Concept Coverage (Adaptive)")
                 print(f"{'='*80}")
 
             # ========== 检测 anyres 多 patch 情况 ==========
@@ -1268,7 +1268,7 @@ class LlavaMetaForCausalLM(ABC):
             M = text_embeds.shape[0]
             text_normalized = text_embeds / (text_embeds.norm(dim=-1, keepdim=True) + 1e-8)
 
-            # 🔥 STAR-V3 Adaptive: Stage 1 keeps target*2 tokens (not fixed 50%)
+            # 🔥 STAR-PRO Adaptive: Stage 1 keeps target*2 tokens (not fixed 50%)
             stage1_keep_num = self.visual_token_num * 2  # e.g., target=128 → keep 256, target=640 → keep 1280
 
             # 🔥 Anyres 多 patch：每个 patch 按比例分配 tokens

@@ -40,16 +40,16 @@ def eval_model(args):
     pdrop_config = {"T": args.visual_token_num}
 
     # STAR Configuration
-    use_star = True if args.pruning_method in ["star", "star_v2", "star_v3"] else False
+    use_star = True if args.pruning_method in ["star", "star_v2", "star_pro"] else False
     star_config = {
         "T": args.visual_token_num,
         "num_latent": 20,
         "latent_pool_size": (5, 4),
-        "mode": "star_v3" if args.pruning_method == "star_v3" else ("star_v2" if args.pruning_method == "star_v2" else "star"),
+        "mode": "star_pro" if args.pruning_method == "star_pro" else ("star_v2" if args.pruning_method == "star_v2" else "star"),
         "debug": True,
     }
 
-    use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method or args.pruning_method == "star_v3" else False
+    use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method or args.pruning_method == "star_pro" else False
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,

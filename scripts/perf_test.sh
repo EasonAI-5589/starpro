@@ -1,9 +1,9 @@
 #!/bin/bash
 # Single GPU Performance Test
 # Usage: bash scripts/perf_test.sh <method> <token_num> [gpu_id]
-# Example: bash scripts/perf_test.sh star_v3 128 0
+# Example: bash scripts/perf_test.sh star_pro 128 0
 
-METHOD=${1:-"star_v3"}
+METHOD=${1:-"star_pro"}
 TOKEN=${2:-128}
 GPU_ID=${3:-0}
 

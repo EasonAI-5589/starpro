@@ -7,7 +7,7 @@
 # Model configuration
 MODEL_VERSION="v1_5"
 MODEL_SCALE="7b"
-METHOD="star_v3"
+METHOD="star_pro"
 TOKEN_BUDGET=128
 
 # Lambda values to test
@@ -71,7 +71,7 @@ for lambda in "${LAMBDA_VALUES[@]}"; do
     # Export lambda for this run
     export LAMBDA=$lambda
 
-    # Export debug flag (controls both star_v3 debug output and tqdm progress bar)
+    # Export debug flag (controls both star_pro debug output and tqdm progress bar)
     export ENABLE_DEBUG=$ENABLE_DEBUG
 
     for task in "${TASKS[@]}"; do

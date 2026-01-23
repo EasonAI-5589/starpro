@@ -1,8 +1,8 @@
-# STAR-V3 Stage 2: Progressive Text-Guided Visual Token Pruning
+# STAR-PRO Stage 2: Progressive Text-Guided Visual Token Pruning
 
 ## Executive Summary
 
-STAR-V3 的 Stage 2 是一个**渐进式、层内(layer-wise)的视觉token剪枝机制**，它在Transformer的每一层中动态地根据文本引导来选择性保留最重要的视觉token。与Stage 1的一次性剪枝不同，Stage 2采用**多步骤逐层递减**的策略，在模型推理过程中持续优化视觉token的使用。
+STAR-PRO 的 Stage 2 是一个**渐进式、层内(layer-wise)的视觉token剪枝机制**，它在Transformer的每一层中动态地根据文本引导来选择性保留最重要的视觉token。与Stage 1的一次性剪枝不同，Stage 2采用**多步骤逐层递减**的策略，在模型推理过程中持续优化视觉token的使用。
 
 ### 核心特点
 
@@ -127,10 +127,10 @@ similarity = torch.matmul(last_token_hidden, visual_hidden.transpose(1, 2))
 - 对于复杂问题，需要多个文本token共同指导
 - 单点评估容易受noise影响
 
-**STAR-V3 的解决方案**：使用**多个重要文本token**作为raters：
+**STAR-PRO 的解决方案**：使用**多个重要文本token**作为raters：
 
 ```python
-# STAR-V3: 多个 text raters
+# STAR-PRO: 多个 text raters
 text_hidden = hidden_states[:, visual_end:, :]  # (B, N_text, D)
 
 # 识别重要的文本tokens
@@ -494,7 +494,7 @@ def _prune_visual_tokens_stage2(
 | 方法 | Token变化 | 信息保留 | 计算开销 |
 |------|----------|---------|---------|
 | **一次性剪枝** | 320→160 (一步) | 较差（突然丢失50%） | 低 |
-| **渐进式剪枝** (STAR-V3) | 320→267→213→160 (三步) | 更好（逐步筛选） | 中等 |
+| **渐进式剪枝** (STAR-PRO) | 320→267→213→160 (三步) | 更好（逐步筛选） | 中等 |
 
 **渐进式剪枝的好处**：
 
@@ -879,7 +879,7 @@ memory_saved = memory_no_pruning - memory_stage1_2  # 约 46 MB (25.7%)
 - 在第一层就执行剪枝
 - 使用最后一个text token作为指导
 
-**STAR-V3 Stage 2**：
+**STAR-PRO Stage 2**：
 - 渐进式多阶段剪枝
 - 在模型中后部执行（Layer 10-30）
 - 使用多个text raters作为指导
@@ -889,10 +889,10 @@ memory_saved = memory_no_pruning - memory_stage1_2  # 约 46 MB (25.7%)
 | 方法 | VQA-v2 | GQA | TextVQA | 推理速度 |
 |------|--------|-----|---------|---------|
 | FastV | 75.8 | 58.9 | 55.1 | 1.32x |
-| **STAR-V3** | **77.8** | **61.2** | **57.6** | **1.28x** |
+| **STAR-PRO** | **77.8** | **61.2** | **57.6** | **1.28x** |
 | 提升 | **+2.0** | **+2.3** | **+2.5** | 略慢4% |
 
-STAR-V3在牺牲极小速度的情况下，获得了显著的精度提升。
+STAR-PRO在牺牲极小速度的情况下，获得了显著的精度提升。
 
 ### 8.2 与TRIM的对比
 
@@ -901,7 +901,7 @@ STAR-V3在牺牲极小速度的情况下，获得了显著的精度提升。
 - 合并相似的tokens而非丢弃
 - 单阶段执行
 
-**STAR-V3 Stage 2**：
+**STAR-PRO Stage 2**：
 - 基于attention的token选择（select）
 - 保留最重要的tokens
 - 多阶段渐进式
@@ -911,11 +911,11 @@ STAR-V3在牺牲极小速度的情况下，获得了显著的精度提升。
 | 方法 | VQA-v2 | GQA | 保留tokens | 策略 |
 |------|--------|-----|-----------|------|
 | TRIM | 77.1 | 60.5 | 160 | Merge |
-| **STAR-V3** | **77.8** | **61.2** | 160 | Select |
+| **STAR-PRO** | **77.8** | **61.2** | 160 | Select |
 
 **分析**：
 - TRIM的merge策略可能引入信息混淆
-- STAR-V3的select策略更直接，保留最相关信息
+- STAR-PRO的select策略更直接，保留最相关信息
 
 ### 8.3 与SparseVLM的对比
 
@@ -924,14 +924,14 @@ STAR-V3在牺牲极小速度的情况下，获得了显著的精度提升。
 - 需要特殊训练
 - 固定剪枝模式
 
-**STAR-V3 Stage 2**：
+**STAR-PRO Stage 2**：
 - 动态选择（基于实际attention）
 - 无需特殊训练（使用预训练模型）
 - 自适应剪枝模式
 
 **对比**：
 
-| 维度 | SparseVLM | STAR-V3 Stage 2 |
+| 维度 | SparseVLM | STAR-PRO Stage 2 |
 |------|-----------|-----------------|
 | 训练需求 | 需要重新训练 | 无需训练 |
 | 灵活性 | 固定模式 | 动态自适应 |
@@ -1034,7 +1034,7 @@ def _lightweight_importance_estimation(self, hidden_states, visual_start, visual
 
 ### Stage 2 的核心价值
 
-STAR-V3 的 Stage 2 是一个**精细化、自适应、渐进式**的视觉token剪枝机制，它通过以下关键设计实现了高效和高精度的平衡：
+STAR-PRO 的 Stage 2 是一个**精细化、自适应、渐进式**的视觉token剪枝机制，它通过以下关键设计实现了高效和高精度的平衡：
 
 1. **Multi-token Text Raters**
    - 使用多个重要文本tokens而非单一token

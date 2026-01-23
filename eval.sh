@@ -8,7 +8,7 @@ MODEL_VERSION="v1_5"
 MODEL_SCALE="13b"
 
 # Compression method: fastv, sparsevlm, pdrop, visionzip, dart, divprune, dp3, cdp3, star, star_v2, thcp, vanilla
-METHOD="star_v3"
+METHOD="star_pro"
 
 # Token budgets: 32, 64, 128, 192, 256
 TOKEN_BUDGETS=(32)
@@ -41,7 +41,7 @@ MODEL_VERSION="v1_6"
 MODEL_SCALE="7b"
 
 # Compression method: fastv, sparsevlm, pdrop, visionzip, dart, divprune, dp3, cdp3, star, star_v2, thcp, vanilla
-METHOD="star_v3"
+METHOD="star_pro"
 
 # Token budgets: 
 TOKEN_BUDGETS=(160 320 640)
@@ -71,7 +71,7 @@ MODEL_VERSION="v1_6"
 MODEL_SCALE="13b"
 
 # Compression method: fastv, sparsevlm, pdrop, visionzip, dart, divprune, dp3, cdp3, star, star_v2, thcp, vanilla
-METHOD="star_v3"
+METHOD="star_pro"
 
 # Token budgets: 
 TOKEN_BUDGETS=(320)
@@ -102,19 +102,19 @@ done
 
 
 
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/13b/mme.sh star_v3 128
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/13b/mme.sh star_pro 128
 
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/pope.sh star_v3 128
-
-
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/sqa.sh star_v3 128
-
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/mme.sh star_v3 64
-
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/vqav2.sh star_v3 32
-
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/mmvet.sh star_v3 32
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/pope.sh star_pro 128
 
 
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/sqa.sh star_pro 128
 
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/13b/pope.sh star_v3 128
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/mme.sh star_pro 64
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/vqav2.sh star_pro 32
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/mmvet.sh star_pro 32
+
+
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/13b/pope.sh star_pro 128

@@ -127,7 +127,7 @@ export CUSTOM_PRUNING_SCHEDULE='[[20, 96], [28, 32]]'
 
 ### Configuration
 - **Model:** LLaVA-1.5-7B
-- **Method:** star_v3 (Stage 1 + Stage 2 full pipeline)
+- **Method:** star_pro (Stage 1 + Stage 2 full pipeline)
 - **Token Budget:** T = 128
 - **Lambda:** λ = 0.5 (fixed, from Stage 1 ablation)
 - **Benchmarks:** MME, GQA, POPE, TextVQA
@@ -168,14 +168,14 @@ SCHEDULE_CONFIGS=(
 export PRUNING_SCHEDULE_MODE=progressive  # or single_stage, uniform
 export LAMBDA=0.5
 export ENABLE_DEBUG=0
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/mme.sh star_v3 128
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/mme.sh star_pro 128
 
 # Test with custom schedule
 export CUSTOM_PRUNING_SCHEDULE='[[12, 64], [24, 32]]'
 unset PRUNING_SCHEDULE_MODE  # Custom takes priority
 export LAMBDA=0.5
 export ENABLE_DEBUG=0
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/mme.sh star_v3 128
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/mme.sh star_pro 128
 ```
 
 ## Expected Results
@@ -203,9 +203,9 @@ Progressive [Ours]        87.3    1444.0   60.4    XX.X
 
 1. **`llava/model/language_model/modelling_llama_star.py`**
    - Added three predefined schedules:
-     - `STAR_V3_SCHEDULE`: Progressive front-heavy (default)
-     - `STAR_V3_SINGLE_STAGE_SCHEDULE`: Single-stage pruning
-     - `STAR_V3_UNIFORM_SCHEDULE`: Uniform progressive
+     - `STAR_PRO_SCHEDULE`: Progressive front-heavy (default)
+     - `STAR_PRO_SINGLE_STAGE_SCHEDULE`: Single-stage pruning
+     - `STAR_PRO_UNIFORM_SCHEDULE`: Uniform progressive
    - Added `CUSTOM_PRUNING_SCHEDULE` environment variable support
    - Added `PRUNING_SCHEDULE_MODE` environment variable support
    - Priority: custom schedule > predefined mode > default
@@ -228,11 +228,11 @@ else:
     # Use predefined schedules
     pruning_schedule_mode = os.environ.get('PRUNING_SCHEDULE_MODE', 'progressive')
     if pruning_schedule_mode == 'single_stage':
-        self.pruning_schedule = STAR_V3_SINGLE_STAGE_SCHEDULE[self.scale][self.target_visual_tokens]
+        self.pruning_schedule = STAR_PRO_SINGLE_STAGE_SCHEDULE[self.scale][self.target_visual_tokens]
     elif pruning_schedule_mode == 'uniform':
-        self.pruning_schedule = STAR_V3_UNIFORM_SCHEDULE[self.scale][self.target_visual_tokens]
+        self.pruning_schedule = STAR_PRO_UNIFORM_SCHEDULE[self.scale][self.target_visual_tokens]
     else:  # 'progressive' (default)
-        self.pruning_schedule = STAR_V3_SCHEDULE[self.scale][self.target_visual_tokens]
+        self.pruning_schedule = STAR_PRO_SCHEDULE[self.scale][self.target_visual_tokens]
 ```
 
 ## Designing Custom Schedules
@@ -317,7 +317,7 @@ verify_schedule([(10, 128), (20, 64), (28, 32)])
 This ablation is inspired by:
 - **FastV** (Chen et al., 2024): Single-stage pruning at specific layers
 - **SparseVLM** (Yuan et al., 2024): Multi-layer progressive pruning
-- **STAR-V3** (This work): Adaptive progressive pruning with front-heavy schedule
+- **STAR-PRO** (This work): Adaptive progressive pruning with front-heavy schedule
 
 ## Citation
 

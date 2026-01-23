@@ -1,4 +1,4 @@
-# STAR-V3: Adaptive Two-Stage Visual Token Pruning for Vision-Language Models
+# STAR-PRO: Adaptive Two-Stage Visual Token Pruning for Vision-Language Models
 
 ## Technical Documentation
 
@@ -26,7 +26,7 @@
 
 ## 1. Executive Summary
 
-STAR-V3 is an adaptive two-stage visual token pruning framework designed to accelerate Vision-Language Models (VLMs) while maintaining high accuracy. Unlike previous approaches that use fixed pruning ratios, STAR-V3 introduces **adaptive scheduling** where Stage 1 pruning dynamically adjusts to the final target, ensuring optimal token budget allocation across model layers.
+STAR-PRO is an adaptive two-stage visual token pruning framework designed to accelerate Vision-Language Models (VLMs) while maintaining high accuracy. Unlike previous approaches that use fixed pruning ratios, STAR-PRO introduces **adaptive scheduling** where Stage 1 pruning dynamically adjusts to the final target, ensuring optimal token budget allocation across model layers.
 
 **Key Achievements:**
 - **Adaptive Stage 1**: Keeps `target × 2` tokens (e.g., target=640 → keep 1280) instead of fixed 50%
@@ -57,9 +57,9 @@ Vision-Language Models like LLaVA-NeXT process images by converting them into hu
 | **PDrop** | Only uses last token for guidance; vulnerable to noise |
 | **STAR-V2** | Fixed 50% Stage 1 pruning; not adaptive to target budget |
 
-### 2.3 Our Solution: STAR-V3
+### 2.3 Our Solution: STAR-PRO
 
-STAR-V3 addresses these limitations through:
+STAR-PRO addresses these limitations through:
 
 1. **Adaptive Two-Stage Framework**: Stage 1 adapts to final target (keeps `2×target` instead of fixed 50%)
 2. **THCP Algorithm**: Ensures selected tokens cover all important textual concepts
@@ -401,7 +401,7 @@ Previous methods (e.g., PDrop, STAR original) use only the **last text token** f
 - **Misses key information:** Important concepts may appear early in the query
 - **Unstable:** Small changes in query phrasing drastically change selection
 
-**STAR-V3 Solution:** Use **multiple important text tokens** (inspired by SparseVLM).
+**STAR-PRO Solution:** Use **multiple important text tokens** (inspired by SparseVLM).
 
 #### 5.2.2 Text Rater Selection Algorithm
 
@@ -598,7 +598,7 @@ Final allocation:
 #### 5.3.3 Implementation in THCP
 
 ```python
-# In llava_arch.py - STAR-V3 Stage 1
+# In llava_arch.py - STAR-PRO Stage 1
 
 # Detect anyres multi-patch situation
 is_anyres_multi_patch = (B > 1 and
@@ -653,10 +653,10 @@ image_features = [x[m] for x, m in zip(image_features, index_masks)]
 
 #### 6.1.1 Schedule Design
 
-STAR-V3 uses a **3-step progressive schedule** for 7B models:
+STAR-PRO uses a **3-step progressive schedule** for 7B models:
 
 ```python
-STAR_V3_SCHEDULE = {
+STAR_PRO_SCHEDULE = {
     "7b": {
         # Pad mode
         192: [(8, 192), (16, 144), (24, 96)],   # Avg = 192.0
@@ -712,7 +712,7 @@ Average = (384×8 + 192×7 + 144×7 + 96×7) / 32
 ```python
 def forward(self, input_ids=None, inputs_embeds=None, ...):
     """
-    STAR-V3 Stage 2: Progressive pruning in LLM forward pass.
+    STAR-PRO Stage 2: Progressive pruning in LLM forward pass.
     """
     # Initialize tracking
     if past_key_values is None:
@@ -732,7 +732,7 @@ def forward(self, input_ids=None, inputs_embeds=None, ...):
         )
         self.prefill_done = True
 
-        print(f"[STAR-V3 Stage 2] Prefill: visual tokens = {self.current_visual_length}")
+        print(f"[STAR-PRO Stage 2] Prefill: visual tokens = {self.current_visual_length}")
 
     # Iterate through transformer layers
     hidden_states = inputs_embeds
@@ -790,18 +790,18 @@ STAR-LLaVA/
 ```python
 def encode_images(self, images, texts=None):
     """
-    Encode images with STAR-V3 Stage 1 pruning.
+    Encode images with STAR-PRO Stage 1 pruning.
 
     Returns:
         image_features: (B, stage1_keep_num, D) - Pruned features
         index_masks: (B, N) - Boolean mask of selected tokens
-        merged_features: None (not used in STAR-V3)
+        merged_features: None (not used in STAR-PRO)
     """
 ```
 
 **Core logic** (lines 1225-1370):
 ```python
-elif self.pruning_method == 'star_v3':
+elif self.pruning_method == 'star_pro':
     # 1. Detect anyres multi-patch
     is_anyres_multi_patch = (B > 1 and ...)
 
@@ -842,9 +842,9 @@ class STARVLMModel(LlamaModel):
         self.target_visual_tokens = starvlm_config["T"]
         self.mode = starvlm_config.get("mode", "star")
 
-        if self.mode == "star_v3":
+        if self.mode == "star_pro":
             self.visual_token_length = self.target_visual_tokens * 2
-            self.pruning_schedule = STAR_V3_SCHEDULE[self.scale][self.target_visual_tokens]
+            self.pruning_schedule = STAR_PRO_SCHEDULE[self.scale][self.target_visual_tokens]
 
         self.pruning_layers = {layer_idx: target for layer_idx, target in self.pruning_schedule}
 ```
@@ -896,7 +896,7 @@ def forward(self, ...):
 stage1_keep_num = original_tokens // 2  # Always 288 for 576 tokens
 ```
 
-**STAR-V3:**
+**STAR-PRO:**
 ```python
 # Adaptive to target
 stage1_keep_num = target_visual_tokens * 2  # Scales with target
@@ -923,7 +923,7 @@ selected = topk(scores)
 # Problem: May miss some text concepts
 ```
 
-**STAR-V3 THCP:**
+**STAR-PRO THCP:**
 ```python
 # Coverage-based greedy selection
 text_coverage = [0] * M
@@ -953,7 +953,7 @@ selected = topk(last_token_attention)
 # Problem: Vulnerable to noise, unstable
 ```
 
-**STAR-V3:**
+**STAR-PRO:**
 ```python
 # Multiple text raters
 text_rater_indices = select_important_text_tokens(...)  # e.g., [2, 5, 7, 9]
@@ -980,7 +980,7 @@ for patch in patches:
 # Problem: Pruning target not distributed correctly
 ```
 
-**STAR-V3:**
+**STAR-PRO:**
 ```python
 # Proper per-patch allocation
 total_target = 1280
@@ -1008,7 +1008,7 @@ for patch in patches:
 | **TRIM** | N/A (single-stage) | ✅ Mean relevance | ❌ No | ❌ No |
 | **SparseVLM** | DPP-based | ✅ Multi-token | ✅ DPP kernel | ⚠️ Limited |
 | **STAR-V2** | Fixed 50% | ✅ Last token | ✅ Self-similarity | ❌ No |
-| **STAR-V3** | **Adaptive (target×2)** | **✅ Multi-token raters** | **✅ THCP greedy** | **✅ Yes** |
+| **STAR-PRO** | **Adaptive (target×2)** | **✅ Multi-token raters** | **✅ THCP greedy** | **✅ Yes** |
 
 ### 9.1 Quantitative Comparison
 
@@ -1018,7 +1018,7 @@ for patch in patches:
 | FastV | 144 | 60.1 | 55.8 | 3.2× | ⚠️ Not supported |
 | PDrop | 128 | 59.8 | 54.9 | 3.8× | ⚠️ Not supported |
 | STAR-V2 | 192 | 61.2 | 57.1 | 2.5× | ⚠️ Breaks on anyres |
-| **STAR-V3** | **192** | **61.9** | **57.8** | **2.6×** | **✅ 640 tokens, 3.8×** |
+| **STAR-PRO** | **192** | **61.9** | **57.8** | **2.6×** | **✅ 640 tokens, 3.8×** |
 
 ---
 
@@ -1139,7 +1139,7 @@ tokens_per_patch = [total_target * importance for importance in patch_importance
 
 For LLaVA-NeXT 7B on A100 GPU:
 
-| Component | Baseline | STAR-V3 | Speedup |
+| Component | Baseline | STAR-PRO | Speedup |
 |-----------|----------|---------|---------|
 | Vision Encoder | 12.3 ms | 12.3 ms | 1.0× |
 | MM Projector | 3.1 ms | 3.1 ms | 1.0× |
@@ -1151,7 +1151,7 @@ For LLaVA-NeXT 7B on A100 GPU:
 
 **Anyres mode (2880 → 640 tokens):**
 
-| Component | Baseline | STAR-V3 | Speedup |
+| Component | Baseline | STAR-PRO | Speedup |
 |-----------|----------|---------|---------|
 | Vision Encoder | 58.6 ms | 58.6 ms | 1.0× |
 | MM Projector | 14.2 ms | 14.2 ms | 1.0× |
@@ -1162,7 +1162,7 @@ For LLaVA-NeXT 7B on A100 GPU:
 
 #### 11.2.2 Accuracy Preservation
 
-| Benchmark | Baseline | STAR-V3 (T=192) | STAR-V3 (T=128) | STAR-V3 (T=64) |
+| Benchmark | Baseline | STAR-PRO (T=192) | STAR-PRO (T=128) | STAR-PRO (T=64) |
 |-----------|----------|-----------------|-----------------|----------------|
 | GQA | 62.3 | 61.9 (-0.4) | 61.2 (-1.1) | 59.8 (-2.5) |
 | TextVQA | 58.2 | 57.8 (-0.4) | 56.9 (-1.3) | 55.1 (-3.1) |
@@ -1171,7 +1171,7 @@ For LLaVA-NeXT 7B on A100 GPU:
 
 **Anyres mode (T=640 for user, actual target=640):**
 
-| Benchmark | Baseline (2880) | STAR-V3 (640) | Degradation |
+| Benchmark | Baseline (2880) | STAR-PRO (640) | Degradation |
 |-----------|-----------------|---------------|-------------|
 | GQA | 64.2 | 63.7 | -0.5 |
 | TextVQA | 61.3 | 60.8 | -0.5 |
@@ -1244,7 +1244,7 @@ Final coverage rate: 0.92 (92% of concepts well-covered)
 
 ## 13. Conclusion
 
-STAR-V3 represents a significant advancement in visual token pruning for VLMs:
+STAR-PRO represents a significant advancement in visual token pruning for VLMs:
 
 **Key Contributions:**
 1. **Adaptive two-stage framework** that adjusts Stage 1 to final target
@@ -1258,18 +1258,18 @@ STAR-V3 represents a significant advancement in visual token pruning for VLMs:
 - **Scalable** to high-resolution anyres inputs
 - **Robust** across diverse query types
 
-STAR-V3 demonstrates that **intelligent token pruning** can dramatically improve VLM efficiency while preserving the semantic richness necessary for complex multimodal reasoning.
+STAR-PRO demonstrates that **intelligent token pruning** can dramatically improve VLM efficiency while preserving the semantic richness necessary for complex multimodal reasoning.
 
 ---
 
 ## Appendix A: Complete Code Reference
 
-### A.1 STAR-V3 Stage 1 (llava_arch.py)
+### A.1 STAR-PRO Stage 1 (llava_arch.py)
 
 ```python
-elif self.pruning_method == 'star_v3':
+elif self.pruning_method == 'star_pro':
     print(f"\n{'='*80}")
-    print(f"STAR-V3 Stage 1: THCP Text-Concept Coverage (Adaptive)")
+    print(f"STAR-PRO Stage 1: THCP Text-Concept Coverage (Adaptive)")
     print(f"{'='*80}")
 
     # Detect anyres multi-patch
@@ -1377,7 +1377,7 @@ elif self.pruning_method == 'star_v3':
     index_masks = torch.stack(all_masks, dim=0)
 ```
 
-### A.2 STAR-V3 Stage 2 (modeling_llama_star.py)
+### A.2 STAR-PRO Stage 2 (modeling_llama_star.py)
 
 See full implementation in [modelling_llama_star.py](llava/model/language_model/modelling_llama_star.py#L228-L400).
 
