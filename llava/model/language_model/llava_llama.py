@@ -17,6 +17,7 @@ from .modeling_llama_fastv import FastVLlamaModel
 from .modeling_llama_sparsevlm import SparseLlamaModel
 from .modeling_llama_pdrop import PDropLlamaModel
 from .modelling_llama_star import STARVLMModel  # ⭐ 从 modelling_llama_star 导入
+from .modelling_llama_mustdrop import MustDropLlamaModel  # MustDrop baseline
 from ..llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
 
 
@@ -58,24 +59,53 @@ class STARLlavaLlamaModel(LlavaMetaModel, STARVLMModel):
     STAR integrated with LLaVA
     """
     config_class = LlavaLlamaConfig
-    
+
     def __init__(self, config: LlamaConfig, star_config: dict):
         super(STARLlavaLlamaModel, self).__init__(config, starvlm_config=star_config)
+
+
+# MustDrop: Dual Attention Filter baseline for comparison
+class MustDropLlavaLlamaModel(LlavaMetaModel, MustDropLlamaModel):
+    """
+    MustDrop baseline integrated with LLaVA.
+
+    Reference: MustDrop paper - "MustDrop: Training-free Token Dropping for Efficient VLMs"
+
+    Key features:
+    1. Vision Encoder: Layer 0 token merging + Layer 23 key set extraction
+    2. LLM: Dual Attention Filter at layers [2, 6, 10, 14]
+    3. KV Cache: Progressive sparsification
+    """
+    config_class = LlavaLlamaConfig
+
+    def __init__(self, config: LlamaConfig, mustdrop_config: dict = None):
+        super(MustDropLlavaLlamaModel, self).__init__(config, mustdrop_config=mustdrop_config)
 
 
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     config_class = LlavaLlamaConfig
 
-    def __init__(self, config, pruning_method=None, visual_token_num=None, 
+    def __init__(self, config, pruning_method=None, visual_token_num=None,
                  use_fastv=False, fastv_config=None,
                  use_sparsevlm=False, sparsevlm_config=None,
                  use_pdrop=False, pdrop_config=None,
                  use_star=False, star_config=None,  # ⭐ 参数名: use_star, star_config
+                 use_mustdrop=False, mustdrop_config=None,  # MustDrop baseline
                  **kwargs):
+        # 🔥 MustDrop: Set config flag BEFORE model creation
+        # This ensures build_vision_tower() uses CLIPVisionTowerMustDrop
+        if use_mustdrop:
+            config.use_mustdrop = True
+            # Store mustdrop_config in config for later access
+            config.mustdrop_config = mustdrop_config if mustdrop_config else {}
+
         super(LlamaForCausalLM, self).__init__(config)
-        
-        # ⭐ Model selection with STAR support
-        if use_star:
+
+        # ⭐ Model selection with STAR and MustDrop support
+        if use_mustdrop:
+            print(f"Use MustDrop: {mustdrop_config}")
+            self.model = MustDropLlavaLlamaModel(config, mustdrop_config=mustdrop_config)
+        elif use_star:
             self.model = STARLlavaLlamaModel(config, star_config=star_config)
         elif use_fastv:
             print(f"Use FastV: {fastv_config}")
@@ -96,6 +126,10 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         # Visual Token Pruning config
         self.pruning_method = pruning_method
         self.visual_token_num = visual_token_num
+
+        # 🔥 MustDrop: Store flag and config for access in forward/generate
+        self.use_mustdrop = use_mustdrop
+        self.mustdrop_config = mustdrop_config
 
         # Latency
         self.start_latency = False
@@ -197,7 +231,43 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 images,
                 image_sizes
             )
-        
+
+        # MustDrop: Set parameters on model before forward
+        # Reference: MustDrop sparse_llava_llama.py parameter passing
+        if hasattr(self.model, 'img_seq') and images is not None and inputs_embeds is not None:
+            # 🔥 MustDrop Full Integration: Get actual values from Vision Encoder
+            # Reference: MustDrop clip_encoder.py + modelling_sparse_llama.py
+            if self.use_mustdrop and hasattr(self, '_mustdrop_img_seq'):
+                # Use actual values from MustDrop Vision Encoder
+                # img_seq: Number of visual tokens AFTER merging (< 576)
+                self.model.img_seq = self._mustdrop_img_seq
+
+                # key_set: Format expected by MustDropLlamaModel is [num_keys, key_indices_tensor]
+                # Reference: modelling_llama_mustdrop.py:256-257
+                if self._mustdrop_key_set is not None:
+                    key_set = self._mustdrop_key_set
+                    # key_set shape: [B, K] where K is number of key tokens
+                    num_keys = key_set.shape[1] if key_set.dim() > 1 else key_set.shape[0]
+                    key_indices = key_set[0] if key_set.dim() > 1 else key_set  # Take first batch
+                    self.model.key_set = [num_keys, key_indices]
+                else:
+                    self.model.key_set = None
+
+                print(f"[MustDrop] img_seq={self.model.img_seq} (after merging), "
+                      f"key_set_size={self.model.key_set[0] if self.model.key_set else 0}")
+            else:
+                # Fallback: Standard LLaVA without Vision Encoder modifications
+                # Default LLaVA: 576 tokens for 336x336 image with 14x14 patch
+                self.model.img_seq = 576
+                self.model.key_set = None
+
+            # System prompt length (before image tokens)
+            # Reference: MustDrop modelling_sparse_llama.py:237
+            self.model.pre_prompt_length_list = [35]  # Default LLaVA system prompt length
+
+            # Total token length
+            self.model.token_length_list = [inputs_embeds.shape[1]]
+
         if self.start_latency:
             if self.phase == "prefill" and input_ids is None:
                 self.start_event.record()
@@ -264,6 +334,26 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 image_sizes=image_sizes,
                 texts=texts
             )
+
+            # 🔥 MustDrop: Set parameters on model before generate
+            # This is needed because generate() internally calls forward()
+            if self.use_mustdrop and hasattr(self.model, 'img_seq'):
+                if hasattr(self, '_mustdrop_img_seq'):
+                    self.model.img_seq = self._mustdrop_img_seq
+
+                    if self._mustdrop_key_set is not None:
+                        key_set = self._mustdrop_key_set
+                        num_keys = key_set.shape[1] if key_set.dim() > 1 else key_set.shape[0]
+                        key_indices = key_set[0] if key_set.dim() > 1 else key_set
+                        self.model.key_set = [num_keys, key_indices]
+                    else:
+                        self.model.key_set = None
+                else:
+                    self.model.img_seq = 576
+                    self.model.key_set = None
+
+                self.model.pre_prompt_length_list = [35]
+                self.model.token_length_list = [inputs_embeds.shape[1]]
         else:
             inputs_embeds = self.get_model().embed_tokens(inputs)
             visual_token_num = 0

@@ -97,7 +97,20 @@ def eval_model(args):
     
     use_pdrop = True if args.pruning_method == "pdrop" else False
     pdrop_config = {"T": args.visual_token_num}
-    
+
+    # 🔥 MustDrop Configuration (Dual Attention Filter baseline)
+    # Reference: MustDrop paper - training-free token pruning
+    use_mustdrop = True if args.pruning_method == "mustdrop" else False
+    mustdrop_config = {
+        "pruning_layers": [2, 6, 10, 14],  # 7B model layers (modelling_sparse_llama.py:134)
+        "global_thr": 1.0,                  # Global attention threshold (modelling_sparse_llama.py:135)
+        "individual_thr": 0.0,              # Individual attention threshold (modelling_sparse_llama.py:136)
+        "keep_rate": 0.08,                  # 8% key tokens from CLS attention (clip_encoder.py:102)
+        "merge_threshold": 0.8,             # Cosine similarity for token merging (clip_encoder.py:111)
+        "merge_window_size": (3, 3),        # Super patch size 3x3 (clip_encoder.py:111)
+        "T": args.visual_token_num,         # Target visual tokens for comparison
+    }
+
     # ⭐ STAR Configuration
     use_star = True if args.pruning_method in ["star", "star_v2", "star_pro", "star_v5"] else False
     star_config = {
@@ -118,6 +131,7 @@ def eval_model(args):
         use_sparsevlm=use_sparsevlm, sparsevlm_config=sparsevlm_config,
         use_pdrop=use_pdrop, pdrop_config=pdrop_config,
         use_star=use_star, star_config=star_config,  # ⭐ STAR
+        use_mustdrop=use_mustdrop, mustdrop_config=mustdrop_config,  # 🔥 MustDrop
         use_text_tower=use_text_tower,
     )
 
@@ -168,17 +182,34 @@ def eval_model(args):
             # Measure end-to-end time
             start_time = time.time()
 
-            output_ids, visual_token_num = model.generate(
-                input_ids,
-                images=image_tensors,
-                image_sizes=image_sizes,
-                texts=question,
-                do_sample=True if args.temperature > 0 else False,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                num_beams=args.num_beams,
-                max_new_tokens=args.max_new_tokens,
-                use_cache=True)
+            # 🔥 MustDrop: Different generate() signature
+            # Reference: MustDrop model_vqa_loader.py:105-116
+            if use_mustdrop:
+                output_ids = model.generate(
+                    mustdrop_config["global_thr"],      # First positional arg
+                    mustdrop_config["individual_thr"],  # Second positional arg
+                    input_ids,
+                    images=image_tensors,
+                    image_sizes=image_sizes,
+                    do_sample=True if args.temperature > 0 else False,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    num_beams=args.num_beams,
+                    max_new_tokens=args.max_new_tokens,
+                    use_cache=True)
+                visual_token_num = getattr(model.model, 'visual_token_num', 576)
+            else:
+                output_ids, visual_token_num = model.generate(
+                    input_ids,
+                    images=image_tensors,
+                    image_sizes=image_sizes,
+                    texts=question,
+                    do_sample=True if args.temperature > 0 else False,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    num_beams=args.num_beams,
+                    max_new_tokens=args.max_new_tokens,
+                    use_cache=True)
 
             end_time = time.time()
             end_to_end_time = end_time - start_time

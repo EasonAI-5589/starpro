@@ -24,6 +24,10 @@ from llava.constants import DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, D
 
 
 def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, load_4bit=False, device_map="auto", device="cuda", use_flash_attn=False, use_text_tower=False, **kwargs):
+    # Extract MustDrop configuration from kwargs
+    use_mustdrop = kwargs.pop('use_mustdrop', False)
+    mustdrop_config = kwargs.pop('mustdrop_config', {})
+
     kwargs = {"device_map": device_map, **kwargs}
 
     if device != "cuda":
@@ -113,7 +117,21 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                 model = LlavaQwenForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, **kwargs)
             else:
                 tokenizer = AutoTokenizer.from_pretrained(model_path, use_fast=False)
-                model = LlavaLlamaForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, **kwargs)
+                # 🔥 MustDrop: Load MustDrop-enabled model when use_mustdrop=True
+                # Reference: MustDrop official builder.py:121-127
+                if use_mustdrop:
+                    print("Loading MustDrop LLaVA model (Dual Attention Filter)...")
+                    model = MustDropLlavaLlamaForCausalLM.from_pretrained(
+                        model_path,
+                        low_cpu_mem_usage=True,
+                        **kwargs
+                    )
+                    # Store MustDrop config for later use in generate()
+                    model.mustdrop_config = mustdrop_config
+                    # Set use_mustdrop in model config so vision tower uses CLIPVisionTowerMustDrop
+                    model.config.use_mustdrop = True
+                else:
+                    model = LlavaLlamaForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, **kwargs)
     else:
         # Load language model
         if model_base is not None:
