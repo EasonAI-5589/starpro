@@ -121,15 +121,19 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                 # Reference: MustDrop official builder.py:121-127
                 if use_mustdrop:
                     print("Loading MustDrop LLaVA model (Dual Attention Filter)...")
+                    # 🔥 CRITICAL: Set use_mustdrop in config BEFORE from_pretrained()
+                    # Vision Tower is initialized during from_pretrained(), so config must be ready
+                    from transformers import AutoConfig
+                    mustdrop_cfg = AutoConfig.from_pretrained(model_path)
+                    mustdrop_cfg.use_mustdrop = True
                     model = MustDropLlavaLlamaForCausalLM.from_pretrained(
                         model_path,
                         low_cpu_mem_usage=True,
+                        config=mustdrop_cfg,
                         **kwargs
                     )
                     # Store MustDrop config for later use in generate()
                     model.mustdrop_config = mustdrop_config
-                    # Set use_mustdrop in model config so vision tower uses CLIPVisionTowerMustDrop
-                    model.config.use_mustdrop = True
                 else:
                     model = LlavaLlamaForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, **kwargs)
     else:
