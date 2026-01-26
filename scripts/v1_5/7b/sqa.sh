@@ -5,8 +5,8 @@ IFS=',' read -ra GPULIST <<< "$gpu_list"
 
 CHUNKS=${#GPULIST[@]}
 
-CKPT_DIR="/mnt/bn/bes-mllm-shared/checkpoint/LLaVA"
-DATA_DIR="/mnt/bn/bes-mllm-shared/data/LLaVA/LLaVA-Eval"
+CKPT_DIR="${CKPT_DIR:-/mnt/bn/bes-mllm-shared/checkpoint/LLaVA}"
+DATA_DIR="${DATA_DIR:-/mnt/bn/bes-mllm-shared/data/LLaVA/LLaVA-Eval}"
 
 CKPT="llava-v1.5-7b"
 SPLIT="llava_test_CQM-I"
@@ -49,7 +49,7 @@ for IDX in $(seq 0 $((CHUNKS-1))); do
 done
 
 # 保存结果
-RESULT_DIR="/mnt/bn/bes-nas-zqz-lq-v6arnold6/mlx/users/zhangqizhe/code/EasonAI/STAR-LLaVA/results"
+RESULT_DIR="${RESULT_DIR:-/mnt/bn/bes-nas-zqz-lq-v6arnold6/mlx/users/zhangqizhe/code/EasonAI/STAR-LLaVA/results}"
 mkdir -p ${RESULT_DIR}
 LOG_FILE="${RESULT_DIR}/sqa_${MODEL_VERSION}_${MODEL_SCALE}_${METHOD}_vtn${TOKEN}.log"
 

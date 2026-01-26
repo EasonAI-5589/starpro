@@ -118,3 +118,14 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/mmvet.sh star_pro 32
 
 
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/13b/pope.sh star_pro 128
+
+
+export CKPT_DIR=/mnt/world_foundational_model/gyc/models                                                                                                                                
+export DATA_DIR=/mnt/world_foundational_model/gyc/LLaVA-Eval                                                                                                                     
+export RESULT_DIR=/mnt/world_foundational_model/gyc/STAR-Pro-LLaVA/results                                                                                                       
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/mme.sh divprune 128
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/mme.sh vanilla 576
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/mme.sh fastv 128
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 bash scripts/v1_5/7b/mme.sh mustdrop 128

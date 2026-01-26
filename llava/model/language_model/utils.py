@@ -86,21 +86,21 @@ def softmax_with_policy(attn, policy, eps=1e-6):    # attn : [2, 687, 32, 32] po
 def scaled_dot_product_attention_with_policy(query, key, value, policy, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None):
     L, S = query.size(-2), key.size(-2)
     scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+    # 🔥 Fix: Create tensor on same device as query to avoid CPU-GPU sync overhead
     if is_causal:
         assert attn_mask is None
-        attn_bias = torch.zeros(L, S, dtype=query.dtype)
-        temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+        attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
+        temp_mask = torch.ones(L, S, dtype=torch.bool, device=query.device).tril(diagonal=0)
         attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
-        attn_bias.to(query.dtype)
 
     if attn_mask is not None:
-        attn_bias = torch.zeros(attn_mask.shape, dtype=query.dtype).to(device=query.device)
+        attn_bias = torch.zeros(attn_mask.shape, dtype=query.dtype, device=query.device)
         if attn_mask.dtype == torch.bool:
             attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
         else:
             attn_bias += attn_mask
     attn_weight = query @ key.transpose(-2, -1) * scale_factor
-    attn_weight += attn_bias.to(device=query.device)
+    attn_weight += attn_bias
     attn_weight = softmax_with_policy(attn_weight, policy)
     attn_logits = attn_weight.clone().detach()
 
@@ -111,12 +111,12 @@ def scaled_dot_product_attention_with_policy(query, key, value, policy, attn_mas
 def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False, scale=None) -> torch.Tensor:
     L, S = query.size(-2), key.size(-2)
     scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
-    attn_bias = torch.zeros(L, S, dtype=query.dtype)
+    # 🔥 Fix: Create tensor on same device as query to avoid CPU-GPU sync overhead
+    attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
     if is_causal:
         assert attn_mask is None
-        temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
+        temp_mask = torch.ones(L, S, dtype=torch.bool, device=query.device).tril(diagonal=0)
         attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
-        attn_bias.to(query.dtype)
 
     if attn_mask is not None:
         if attn_mask.dtype == torch.bool:
@@ -124,7 +124,7 @@ def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.
         else:
             attn_bias += attn_mask
     attn_weight = query @ key.transpose(-2, -1) * scale_factor
-    attn_weight += attn_bias.to(query.device)
+    attn_weight += attn_bias
     attn_weight = torch.softmax(attn_weight, dim=-1)
     attn_logits = attn_weight
 

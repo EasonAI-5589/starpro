@@ -100,11 +100,20 @@ def eval_model(args):
 
     # 🔥 MustDrop Configuration (Dual Attention Filter baseline)
     # Reference: MustDrop paper - training-free token pruning
+    # IMPORTANT: MustDrop uses threshold-based pruning, NOT direct token count!
+    # Thresholds from official MustDrop scripts (scripts/v1_5/eval/textvqa_*.sh):
+    MUSTDROP_THRESHOLDS = {
+        64:  {"global_thr": 0.011,  "individual_thr": 0.01},
+        128: {"global_thr": 0.0012, "individual_thr": 0.001},
+        192: {"global_thr": 0.001,  "individual_thr": 0.001},
+    }
     use_mustdrop = True if args.pruning_method == "mustdrop" else False
+    # Get thresholds for target token count (default to 128 if not found)
+    thr_config = MUSTDROP_THRESHOLDS.get(args.visual_token_num, MUSTDROP_THRESHOLDS[128])
     mustdrop_config = {
         "pruning_layers": [2, 6, 10, 14],  # 7B model layers (modelling_sparse_llama.py:134)
-        "global_thr": 1.0,                  # Global attention threshold (modelling_sparse_llama.py:135)
-        "individual_thr": 0.0,              # Individual attention threshold (modelling_sparse_llama.py:136)
+        "global_thr": thr_config["global_thr"],       # Threshold-based pruning
+        "individual_thr": thr_config["individual_thr"],
         "keep_rate": 0.08,                  # 8% key tokens from CLS attention (clip_encoder.py:102)
         "merge_threshold": 0.8,             # Cosine similarity for token merging (clip_encoder.py:111)
         "merge_window_size": (3, 3),        # Super patch size 3x3 (clip_encoder.py:111)
@@ -120,9 +129,20 @@ def eval_model(args):
         "mode": "star_v5" if args.pruning_method == "star_v5" else ("star_pro" if args.pruning_method == "star_pro" else ("star_v2" if args.pruning_method == "star_v2" else "star")),  # STAR-V5/V3/V2/V1
         "debug": False,  # Set to True for debugging, False for performance testing
     }
+
+    # 🔬 VScan Configuration (Tencent's Training-Free Visual Token Reduction)
+    # Reference: https://github.com/Tencent/SelfEvolvingAgent/tree/main/VScan
+    # Stage 1 (llava_arch): Complementary global and local scans -> stage1_tokens
+    # Stage 2 (modeling_llama_vscan): Middle layer pruning -> stage2_tokens
+    use_vscan = True if args.pruning_method == "vscan" else False
+    vscan_config = {
+        "stage1_tokens": args.visual_token_num,  # Stage 1 output (default: 96)
+        "stage2_tokens": args.vscan_stage2_tokens,  # Stage 2 output (default: 32)
+        "prune_layer": args.vscan_prune_layer,  # Layer for Stage 2 pruning (default: 16 for 7B)
+    }
     
     use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method or args.pruning_method == "star_pro" else False
-    
+
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
@@ -132,6 +152,7 @@ def eval_model(args):
         use_pdrop=use_pdrop, pdrop_config=pdrop_config,
         use_star=use_star, star_config=star_config,  # ⭐ STAR
         use_mustdrop=use_mustdrop, mustdrop_config=mustdrop_config,  # 🔥 MustDrop
+        use_vscan=use_vscan, vscan_config=vscan_config,  # 🔬 VScan
         use_text_tower=use_text_tower,
     )
 
@@ -321,13 +342,19 @@ if __name__ == "__main__":
     parser.add_argument("--visual_token_num", type=int, default=576)
     
     # ⭐ STAR specific arguments
-    parser.add_argument("--num_latent", type=int, default=20, 
+    parser.add_argument("--num_latent", type=int, default=20,
                         help="Number of latent tokens for STAR (default: 20)")
     parser.add_argument("--latent_pool_h", type=int, default=5,
                         help="Height of latent pooling grid for STAR (default: 5)")
     parser.add_argument("--latent_pool_w", type=int, default=4,
                         help="Width of latent pooling grid for STAR (default: 4)")
-    
+
+    # 🔬 VScan specific arguments
+    parser.add_argument("--vscan_stage2_tokens", type=int, default=32,
+                        help="VScan Stage 2 target tokens (default: 32)")
+    parser.add_argument("--vscan_prune_layer", type=int, default=16,
+                        help="VScan Stage 2 pruning layer (default: 16 for 7B, use 20 for 13B)")
+
     args = parser.parse_args()
 
     eval_model(args)

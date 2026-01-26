@@ -18,6 +18,7 @@ from .modeling_llama_sparsevlm import SparseLlamaModel
 from .modeling_llama_pdrop import PDropLlamaModel
 from .modelling_llama_star import STARVLMModel  # ⭐ 从 modelling_llama_star 导入
 from .modelling_llama_mustdrop import MustDropLlamaModel  # MustDrop baseline
+from .modeling_llama_vscan import VScanLlamaModel  # 🔬 VScan baseline
 from ..llava_arch import LlavaMetaModel, LlavaMetaForCausalLM
 
 
@@ -80,6 +81,23 @@ class MustDropLlavaLlamaModel(LlavaMetaModel, MustDropLlamaModel):
 
     def __init__(self, config: LlamaConfig, mustdrop_config: dict = None):
         super(MustDropLlavaLlamaModel, self).__init__(config, mustdrop_config=mustdrop_config)
+
+
+# 🔬 VScan: Training-Free Visual Token Reduction for comparison
+class VScanLlavaLlamaModel(LlavaMetaModel, VScanLlamaModel):
+    """
+    VScan baseline integrated with LLaVA.
+
+    Reference: https://github.com/Tencent/SelfEvolvingAgent/tree/main/VScan
+
+    Key features:
+    1. Stage 1 (Vision Encoder): Complementary global and local scans
+    2. Stage 2 (LLM): Middle layer attention-based pruning
+    """
+    config_class = LlavaLlamaConfig
+
+    def __init__(self, config: LlamaConfig, vscan_config: dict = None):
+        super(VScanLlavaLlamaModel, self).__init__(config, vscan_config=vscan_config)
 
 
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):

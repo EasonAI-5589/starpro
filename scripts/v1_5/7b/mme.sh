@@ -5,15 +5,23 @@ IFS=',' read -ra GPULIST <<< "$gpu_list"
 
 CHUNKS=${#GPULIST[@]}
 
-CKPT_DIR="/mnt/bn/bes-mllm-shared/checkpoint/LLaVA"
-DATA_DIR="/mnt/bn/bes-mllm-shared/data/LLaVA/LLaVA-Eval"
+CKPT_DIR="${CKPT_DIR:-/mnt/bn/bes-mllm-shared/checkpoint/LLaVA}"
+DATA_DIR="${DATA_DIR:-/mnt/bn/bes-mllm-shared/data/LLaVA/LLaVA-Eval}"
 
 CKPT="llava-v1.5-7b"
 SPLIT="llava_mme"
 
 METHOD=${1}
 TOKEN=${2}
+VSCAN_STAGE2=${3:-32}  # VScan Stage 2 tokens (default: 32)
 PARAM="vtn_${TOKEN}"
+
+# 🔬 VScan extra parameter
+VSCAN_ARGS=""
+if [ "$METHOD" == "vscan" ]; then
+    PARAM="vtn_${TOKEN}_s2_${VSCAN_STAGE2}"
+    VSCAN_ARGS="--vscan_stage2_tokens ${VSCAN_STAGE2}"
+fi
 
 # 🔧 从脚本路径自动识别模型版本和规模
 # 脚本路径示例: scripts/v1_5/7b/mme.sh
@@ -33,6 +41,7 @@ for IDX in $(seq 0 $((CHUNKS-1))); do
         --chunk-idx ${IDX} \
         --pruning_method ${METHOD} \
         --visual_token_num ${TOKEN} \
+        ${VSCAN_ARGS} \
         --temperature 0 \
         --conv-mode vicuna_v1 &
 done
@@ -56,7 +65,7 @@ python convert_answer_to_mme.py \
 cd eval_tool
 
 # 保存结果
-RESULT_DIR="/mnt/bn/bes-nas-zqz-lq-v6arnold6/mlx/users/zhangqizhe/code/EasonAI/STAR-LLaVA/results"
+RESULT_DIR="${RESULT_DIR:-/mnt/bn/bes-nas-zqz-lq-v6arnold6/mlx/users/zhangqizhe/code/EasonAI/STAR-LLaVA/results}"
 mkdir -p ${RESULT_DIR}
 LOG_FILE="${RESULT_DIR}/mme_${MODEL_VERSION}_${MODEL_SCALE}_${METHOD}_vtn${TOKEN}.log"
 

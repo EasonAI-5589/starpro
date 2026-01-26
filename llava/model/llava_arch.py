@@ -1649,8 +1649,188 @@ class LlavaMetaForCausalLM(ABC):
                 print(f"  Ready for Stage 2 text-guided progressive pruning")
                 print(f"{'='*80}\n")
 
-        # 🔥 STAR-V2/V2-Anchor/V5 need mm_projector (they bypassed line 307)
-        if self.pruning_method in ['star_v2', 'star_v2_anchor', 'star_v5']:
+        elif self.pruning_method == 'vscan':
+            # ==================== VScan Stage 1: Complementary Global and Local Scans ====================
+            # Reference: https://github.com/Tencent/SelfEvolvingAgent/tree/main/VScan
+            # Aligned with official implementation
+
+            import os
+            enable_debug = os.environ.get('ENABLE_DEBUG', '0') == '1'
+
+            if enable_debug:
+                print(f"\n{'='*80}")
+                print(f"VScan Stage 1: Complementary Global and Local Scans")
+                print(f"{'='*80}")
+
+            # Get features and attentions from vision tower (official VScan way)
+            # Returns: image_features (B, N, C), image_attentions (num_layers, B, num_heads, N)
+            image_features, image_attentions, image_keys, image_cls = self.get_model().get_vision_tower()(
+                images, output_attentions=True
+            )
+            # Average across heads: (num_layers, B, N)
+            image_attentions = image_attentions.mean(dim=2)
+
+            B, N, C = image_features.shape
+            device = image_features.device
+
+            if enable_debug:
+                print(f"[VScan Config]")
+                print(f"  Original tokens: {N}")
+                print(f"  Target tokens (Stage 1): {self.visual_token_num}")
+                print(f"  Attention shape: {image_attentions.shape}")
+
+            # Retain all tokens if visual_token_num equals original
+            if self.visual_token_num >= N:
+                index_masks = torch.ones(B, N, dtype=torch.bool, device=device)
+                image_features = self.get_model().mm_projector(image_features)
+                merged_features = None
+                if enable_debug:
+                    print(f"  Keeping all {N} tokens (no pruning)")
+            else:
+                # ========== Complementary Global and Local Scans ==========
+                # Layer 5 (shallow) for local tokens, Layer -2 (deep) for global tokens
+                image_attentions_shallow = image_attentions[5]   # (B, N)
+                image_attentions_deep = image_attentions[-2].clone()  # (B, N)
+
+                global_ratio = 0.5
+                local_ratio = 1 - global_ratio
+                local_token_num = int(self.visual_token_num * local_ratio)
+                global_token_num = self.visual_token_num - local_token_num
+
+                if enable_debug:
+                    print(f"  Local tokens: {local_token_num} (50%)")
+                    print(f"  Global tokens: {global_token_num} (50%)")
+
+                # ========== Step 1: Window CLS Attention for Local Tokens ==========
+                # Official VScan: 24x24 -> 4x4 windows of size 6x6
+                H = W = 24
+                window_size = 6  # Official: 6x6 windows
+                num_windows_h = H // window_size  # 4
+                num_windows_w = W // window_size  # 4
+                total_windows = num_windows_h * num_windows_w  # 16 windows
+
+                k = local_token_num // total_windows  # tokens per window
+
+                # Reshape attention to (B, H, W)
+                attn_map = image_attentions_shallow.view(B, H, W)
+
+                local_indices_list = []
+                for b in range(B):
+                    indices_b = []
+                    for i in range(num_windows_h):
+                        for j in range(num_windows_w):
+                            # Extract window
+                            window = attn_map[b, i*window_size:(i+1)*window_size, j*window_size:(j+1)*window_size]
+                            window_flat = window.reshape(-1)
+                            # Get top-k indices within window
+                            _, topk_indices = torch.topk(window_flat, k)
+                            # Convert to global indices
+                            for idx in topk_indices:
+                                dy = idx // window_size
+                                dx = idx % window_size
+                                global_y = i * window_size + dy
+                                global_x = j * window_size + dx
+                                global_index = global_y * W + global_x
+                                indices_b.append(global_index.item())
+                    local_indices_list.append(indices_b)
+
+                local_indices = torch.tensor(local_indices_list, device=device, dtype=torch.long)
+
+                if enable_debug:
+                    print(f"\n[Step 1: Local Scan (Window CLS Attention)]")
+                    print(f"  Window size: {window_size}x{window_size}")
+                    print(f"  Total windows: {total_windows}")
+                    print(f"  Tokens per window: {k}")
+                    print(f"  Local indices shape: {local_indices.shape}")
+
+                # ========== Step 2: Deep Layer Global Tokens ==========
+                # Mask out already selected local tokens
+                for b in range(B):
+                    image_attentions_deep[b, local_indices[b]] = 0
+
+                # Select top-k global tokens from remaining
+                global_indices = torch.topk(image_attentions_deep, k=global_token_num, dim=1)[1]
+
+                if enable_debug:
+                    print(f"\n[Step 2: Global Scan (Deep CLS Attention)]")
+                    print(f"  Global indices shape: {global_indices.shape}")
+
+                # ========== Step 3: Combine Indices and Create Mask ==========
+                token_indices = torch.cat((local_indices, global_indices), dim=1)
+
+                # Generate index mask
+                index_masks = torch.zeros(B, N, dtype=torch.bool, device=device)
+                index_masks.scatter_(1, token_indices, True)
+
+                if enable_debug:
+                    print(f"\n[Step 3: Combined Indices]")
+                    print(f"  Total selected: {token_indices.shape[1]}")
+                    print(f"  Index mask sum: {index_masks.sum(dim=1).tolist()}")
+
+                # ========== Step 4: Project and Token Merging ==========
+                image_features = self.get_model().mm_projector(image_features)
+
+                # Token merging: merge non-retained tokens to nearest retained token
+                # Official implementation uses scatter_add_
+                T = index_masks.sum(dim=1)[0].item()  # Number of retained tokens
+
+                retained_tokens = []
+                non_retained_tokens = []
+                for b in range(B):
+                    retained_tokens.append(image_features[b][index_masks[b]])
+                    non_retained_tokens.append(image_features[b][~index_masks[b]])
+
+                retained_tokens = torch.stack(retained_tokens, dim=0)  # (B, T, D)
+                non_retained_tokens = torch.stack(non_retained_tokens, dim=0)  # (B, N-T, D)
+
+                if non_retained_tokens.shape[1] > 0:
+                    # Compute cosine similarity
+                    cosine_sim = F.cosine_similarity(
+                        non_retained_tokens.unsqueeze(2),  # (B, N-T, 1, D)
+                        retained_tokens.unsqueeze(1),      # (B, 1, T, D)
+                        dim=3
+                    )  # (B, N-T, T)
+                    nearest_token_indices = cosine_sim.argmax(dim=2)  # (B, N-T)
+
+                    # Merge using scatter_add_
+                    D = image_features.shape[-1]
+                    scaling = 1
+                    merge_count = torch.zeros(B, T, device=device, dtype=torch.long)
+                    merged_features = retained_tokens * scaling
+
+                    merged_features.scatter_add_(
+                        1,
+                        nearest_token_indices.unsqueeze(-1).expand(-1, -1, D),
+                        non_retained_tokens
+                    )
+                    merge_count.scatter_add_(
+                        1,
+                        nearest_token_indices,
+                        torch.ones_like(nearest_token_indices, dtype=merge_count.dtype)
+                    )
+
+                    # Normalize
+                    merged_features = merged_features / (scaling + merge_count.unsqueeze(2))
+
+                    # Update image_features with merged tokens
+                    for b in range(B):
+                        image_features[b, index_masks[b]] = merged_features[b]
+
+                    if enable_debug:
+                        print(f"\n[Step 4: Token Merging]")
+                        print(f"  Merged {non_retained_tokens.shape[1]} tokens")
+                        print(f"  Average merge count: {merge_count.float().mean().item():.2f}")
+
+                merged_features = None
+
+                if enable_debug:
+                    print(f"\n[VScan Stage 1 Complete]")
+                    print(f"  Output features shape: {image_features.shape}")
+                    print(f"  Index mask shape: {index_masks.shape}")
+                    print(f"{'='*80}\n")
+
+        # 🔥 STAR-V2/V2-Anchor/V5/VScan need mm_projector (they bypassed line 307)
+        if self.pruning_method in ['star_v2', 'star_v2_anchor', 'star_v5', 'vscan']:
             image_features = self.get_model().mm_projector(image_features)
 
         # Note: For other methods, mm_projector is already applied at line 307
@@ -2122,3 +2302,370 @@ class LlavaMetaForCausalLM(ABC):
                     p.requires_grad = False
                 for p in self.get_output_embeddings().parameters():
                     p.requires_grad = False
+
+    # ============================================================
+    # VScan Support: Stage 1 (Complementary Global and Local Scans)
+    # Reference: https://github.com/Tencent/SelfEvolvingAgent/tree/main/VScan
+    # ============================================================
+
+    def window_cls_selection(self, image_attentions, visual_token_num, window_size=6):
+        """
+        Select local tokens using window-based CLS attention.
+
+        Reference: Official VScan llava_arch.py:window_cls_selection
+
+        Args:
+            image_attentions: Tensor of shape (B, N), where N is typically 576 (24x24)
+            visual_token_num: int, T - total number of tokens to select
+            window_size: int, size of square window (default: 6)
+
+        Returns:
+            token_indices: Tensor of shape (B, T), indices of top tokens selected from each window
+        """
+        B, N = image_attentions.shape
+        assert N == 24 * 24, "image_attentions must be of shape (B, 576)"
+        H = W = 24
+
+        # Reshape to (B, H, W)
+        attn_map = image_attentions.view(B, H, W)
+
+        # Calculate number of windows per dimension
+        num_windows_h = H // window_size
+        num_windows_w = W // window_size
+        total_windows = num_windows_h * num_windows_w
+
+        k = visual_token_num // total_windows  # tokens per window
+        token_indices = []
+
+        for b in range(B):
+            indices_b = []
+            for i in range(num_windows_h):
+                for j in range(num_windows_w):
+                    # Extract window
+                    window = attn_map[b, i*window_size:(i+1)*window_size, j*window_size:(j+1)*window_size]
+                    # Flatten the window
+                    window_flat = window.reshape(-1)
+                    # Get top-k indices within the window
+                    topk_values, topk_indices = torch.topk(window_flat, k)
+                    # Map local window indices to global indices in (24x24)
+                    for idx in topk_indices:
+                        dy, dx = divmod(idx.item(), window_size)
+                        global_y = i * window_size + dy
+                        global_x = j * window_size + dx
+                        global_index = global_y * W + global_x
+                        indices_b.append(global_index)
+            token_indices.append(indices_b)
+
+        token_indices = torch.tensor(token_indices, device=image_attentions.device)
+        return token_indices
+
+    def vscan_token_merging(self, image_features, index_mask, scaling=1):
+        """
+        Merge non-retained tokens with their nearest retained tokens based on cosine similarity.
+
+        Reference: Official VScan llava_arch.py:token_merging
+
+        Args:
+            image_features: Tensor of shape (B, N, D)
+            index_mask: Binary mask of shape (B, N), True means retained
+            scaling: Scaling factor for retained tokens
+
+        Returns:
+            merged_features: Tensor of shape (B, N, D)
+        """
+        B, N, D = image_features.shape
+        T = index_mask.sum(dim=1)  # Number of retained tokens for each batch
+
+        # Use boolean indexing to select retained and non-retained tokens
+        retained_tokens = []
+        non_retained_tokens = []
+
+        for b in range(B):
+            retained_tokens.append(image_features[b][index_mask[b]])
+            non_retained_tokens.append(image_features[b][~index_mask[b]])
+
+        # Stack them into tensors
+        retained_tokens = torch.stack(retained_tokens, dim=0)  # (B, T, D)
+        non_retained_tokens = torch.stack(non_retained_tokens, dim=0)  # (B, N - T, D)
+
+        if non_retained_tokens.shape[1] == 0:
+            return image_features
+
+        cosine_sim = torch.nn.functional.cosine_similarity(
+            non_retained_tokens.unsqueeze(2), retained_tokens.unsqueeze(1), dim=3
+        )
+        nearest_token_indices = cosine_sim.argmax(dim=2)  # (B, N - T)
+
+        # Track how many non-retained tokens merge with each retained token
+        merge_count = torch.zeros(B, T[0], device=image_features.device, dtype=torch.int)
+
+        # Merge tokens by averaging
+        merged_features = torch.zeros_like(retained_tokens)  # (B, T, D)
+        merged_features += retained_tokens * scaling
+
+        # Process each non-retained token and add it to its nearest retained token
+        expanded_indices = nearest_token_indices  # Shape: [B, N - T]
+        merged_features.scatter_add_(
+            1, nearest_token_indices.unsqueeze(-1).expand(-1, -1, D), non_retained_tokens
+        )
+        merge_count.scatter_add_(
+            1, expanded_indices, torch.ones_like(expanded_indices, dtype=merge_count.dtype)
+        )
+
+        # Normalize the retained tokens by the number of non-retained tokens merging with them
+        merged_features /= (scaling + merge_count.unsqueeze(2))
+        for b in range(B):
+            # Replace the non-retained tokens with the merged features
+            image_features[b, index_mask[b]] = merged_features[b]
+
+        return image_features
+
+    def encode_images_vscan(self, images):
+        """
+        Encode images using VScan Stage 1: Complementary Global and Local Scans.
+
+        Reference: Official VScan llava_arch.py:encode_images
+
+        Args:
+            images: Input images tensor
+
+        Returns:
+            image_features: Encoded image features after token selection
+            index_masks: Boolean mask indicating selected tokens
+            image_attentions: Attention scores from deep layer
+        """
+        # Get features and attentions from vision tower using vscan_mode
+        vscan_outputs = self.get_model().get_vision_tower()(images, vscan_mode=True)
+        # vscan_outputs is a dict with:
+        # - 'shallow_features': (B, N, D)
+        # - 'shallow_attentions': (B, N) - CLS attention from shallow layer
+        # - 'deep_features': (B, N, D)
+        # - 'deep_attentions': (B, N) - CLS attention from deep layer
+
+        # Use deep features as the main features (matches original VScan implementation)
+        image_features = vscan_outputs['deep_features']
+        image_attentions_shallow = vscan_outputs['shallow_attentions']  # (B, N)
+        image_attentions_deep = vscan_outputs['deep_attentions'].clone()  # (B, N), clone for modification
+
+        B, N = image_features.shape[:2]
+        visual_token_num = self.get_visual_token_num()
+
+        # Retain all tokens if visual_token_num is 576
+        if visual_token_num == 576:
+            index_mask = torch.ones(B, N, dtype=torch.bool, device=image_features.device)
+            image_features = self.get_model().mm_projector(image_features)
+            return image_features, index_mask, image_attentions_deep
+
+        global_ratio = 0.5
+        local_ratio = 1 - global_ratio
+
+        # Window [CLS] Attention - Shallow Layer: Local Tokens
+        local_indices = self.window_cls_selection(
+            image_attentions_shallow, int(visual_token_num * local_ratio), window_size=6
+        )
+
+        # Deep Layer: Global Tokens (mask out already selected local tokens)
+        for b in range(B):
+            image_attentions_deep[b, local_indices[b]] = 0
+        global_indices = torch.topk(
+            image_attentions_deep, k=visual_token_num - int(visual_token_num * local_ratio), dim=1
+        )[1]
+
+        token_indices = torch.cat((local_indices, global_indices), dim=1)
+
+        # Generate index mask
+        index_mask = torch.zeros(B, N, dtype=torch.bool, device=image_features.device)
+        index_mask.scatter_(1, token_indices, True)
+
+        image_features = self.get_model().mm_projector(image_features)
+
+        # Merge all other tokens into the selected tokens
+        image_features = self.vscan_token_merging(image_features, index_mask, scaling=1)
+
+        return image_features, index_mask, vscan_outputs['deep_attentions']
+
+    def prepare_inputs_labels_for_multimodal_x(
+        self, input_ids, position_ids, attention_mask, past_key_values, labels,
+        images, image_sizes=None
+    ):
+        """
+        VScan-specific multimodal input preparation.
+
+        Reference: Official VScan llava_arch.py:prepare_inputs_labels_for_multimodal_x
+
+        This method prepares inputs for VScan by:
+        1. Encoding images with Stage 1 (complementary scans)
+        2. Recording image_token_posi, prompt_len, image_tokens for Stage 2 pruning
+
+        Args:
+            input_ids: Input token IDs
+            position_ids: Position IDs
+            attention_mask: Attention mask
+            past_key_values: Past key values for caching
+            labels: Labels for training
+            images: Input images
+            image_sizes: Image sizes for anyres
+
+        Returns:
+            Tuple of (input_ids, position_ids, attention_mask, past_key_values, inputs_embeds, labels)
+        """
+        vision_tower = self.get_vision_tower()
+        if vision_tower is None or images is None or input_ids.shape[1] == 1:
+            return input_ids, position_ids, attention_mask, past_key_values, None, labels
+
+        # Encode images with VScan Stage 1
+        if type(images) is list or images.ndim == 5:
+            if type(images) is list:
+                images = [x.unsqueeze(0) if x.ndim == 3 else x for x in images]
+            concat_images = torch.cat([image for image in images], dim=0)
+            image_features, index_masks, image_attns = self.encode_images_vscan(concat_images)
+            split_sizes = [image.shape[0] for image in images]
+            image_features = torch.split(image_features, split_sizes, dim=0)
+            index_masks = torch.split(index_masks, split_sizes, dim=0)
+            mm_patch_merge_type = getattr(self.config, 'mm_patch_merge_type', 'flat')
+            if mm_patch_merge_type == 'flat':
+                image_features = [x.flatten(0, 1) for x in image_features]
+                index_masks = [x.flatten(0, 1) for x in index_masks]
+        else:
+            image_features, index_masks, image_attns = self.encode_images_vscan(images)
+            new_image_features = []
+            for image_feature, index_mask in zip(image_features, index_masks):
+                image_feature = image_feature[index_mask]
+                new_image_features.append(image_feature)
+            image_features = torch.stack(new_image_features, dim=0)
+
+        # Handle dummy tensors
+        _labels = labels
+        _position_ids = position_ids
+        _attention_mask = attention_mask
+        if attention_mask is None:
+            attention_mask = torch.ones_like(input_ids, dtype=torch.bool)
+        else:
+            attention_mask = attention_mask.bool()
+        if position_ids is None:
+            position_ids = torch.arange(0, input_ids.shape[1], dtype=torch.long, device=input_ids.device)
+        if labels is None:
+            labels = torch.full_like(input_ids, IGNORE_INDEX)
+
+        # Remove padding using attention_mask
+        _input_ids = input_ids
+        input_ids = [cur_input_ids[cur_attention_mask] for cur_input_ids, cur_attention_mask in zip(input_ids, attention_mask)]
+        labels = [cur_labels[cur_attention_mask] for cur_labels, cur_attention_mask in zip(labels, attention_mask)]
+
+        new_input_embeds = []
+        new_labels = []
+        image_token_posi = []  # VScan: Track image token positions
+        prompt_len = []        # VScan: Track prompt lengths
+        cur_image_idx = 0
+
+        for batch_idx, cur_input_ids in enumerate(input_ids):
+            # Record image position for Stage 2 dropping
+            num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
+            image_index = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist()
+            if image_index == []:
+                image_token_posi.append(-1)
+            else:
+                image_token_posi.append(image_index[0])
+
+            # Record input instruction length in inference mode
+            if not self.training:
+                if image_index == []:
+                    prompt_len.append(cur_input_ids.shape[0])
+                else:
+                    prompt_len.append(cur_input_ids.shape[0] - 1)  # Consider image placeholder
+
+            if num_images == 0:
+                cur_image_features = image_features[cur_image_idx]
+                cur_input_embeds_1 = self.get_model().embed_tokens(cur_input_ids)
+                cur_input_embeds = torch.cat([cur_input_embeds_1, cur_image_features[0:0]], dim=0)
+                new_input_embeds.append(cur_input_embeds)
+                new_labels.append(labels[batch_idx])
+                cur_image_idx += 1
+                continue
+
+            image_token_indices = [-1] + torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0].tolist() + [cur_input_ids.shape[0]]
+            cur_input_ids_noim = []
+            cur_labels = labels[batch_idx]
+            cur_labels_noim = []
+            for i in range(len(image_token_indices) - 1):
+                cur_input_ids_noim.append(cur_input_ids[image_token_indices[i]+1:image_token_indices[i+1]])
+                cur_labels_noim.append(cur_labels[image_token_indices[i]+1:image_token_indices[i+1]])
+            split_sizes = [x.shape[0] for x in cur_labels_noim]
+            cur_input_embeds = self.get_model().embed_tokens(torch.cat(cur_input_ids_noim))
+            cur_input_embeds_no_im = torch.split(cur_input_embeds, split_sizes, dim=0)
+            cur_new_input_embeds = []
+            cur_new_labels = []
+
+            for i in range(num_images + 1):
+                cur_new_input_embeds.append(cur_input_embeds_no_im[i])
+                cur_new_labels.append(cur_labels_noim[i])
+                if i < num_images:
+                    cur_image_features = image_features[cur_image_idx]
+                    cur_image_idx += 1
+                    cur_new_input_embeds.append(cur_image_features)
+                    cur_new_labels.append(torch.full((cur_image_features.shape[0],), IGNORE_INDEX, device=cur_labels.device, dtype=cur_labels.dtype))
+
+            cur_new_input_embeds = [x.to(self.device) for x in cur_new_input_embeds]
+            cur_new_input_embeds = torch.cat(cur_new_input_embeds)
+            cur_new_labels = torch.cat(cur_new_labels)
+
+            new_input_embeds.append(cur_new_input_embeds)
+            new_labels.append(cur_new_labels)
+
+        # Set VScan tracking attributes for Stage 2
+        self.model.image_token_posi = image_token_posi
+        self.model.prompt_len = prompt_len
+        self.model.image_tokens = [image_feature.shape[0] for image_feature in image_features]
+
+        # Truncate sequences to max length
+        tokenizer_model_max_length = getattr(self.config, 'tokenizer_model_max_length', 2048)
+        if tokenizer_model_max_length is not None:
+            new_input_embeds = [x[:tokenizer_model_max_length] for x in new_input_embeds]
+            new_labels = [x[:tokenizer_model_max_length] for x in new_labels]
+
+        # Combine and pad
+        max_len = max(x.shape[0] for x in new_input_embeds)
+        batch_size = len(new_input_embeds)
+
+        new_input_embeds_padded = []
+        new_labels_padded = torch.full((batch_size, max_len), IGNORE_INDEX, dtype=new_labels[0].dtype, device=new_labels[0].device)
+        attention_mask = torch.zeros((batch_size, max_len), dtype=attention_mask.dtype, device=attention_mask.device)
+        position_ids = torch.zeros((batch_size, max_len), dtype=position_ids.dtype, device=position_ids.device)
+
+        for i, (cur_new_embed, cur_new_labels) in enumerate(zip(new_input_embeds, new_labels)):
+            cur_len = cur_new_embed.shape[0]
+            if getattr(self.config, 'tokenizer_padding_side', 'right') == "left":
+                new_input_embeds_padded.append(torch.cat((
+                    torch.zeros((max_len - cur_len, cur_new_embed.shape[1]), dtype=cur_new_embed.dtype, device=cur_new_embed.device),
+                    cur_new_embed
+                ), dim=0))
+                if cur_len > 0:
+                    new_labels_padded[i, -cur_len:] = cur_new_labels
+                    attention_mask[i, -cur_len:] = True
+                    position_ids[i, -cur_len:] = torch.arange(0, cur_len, dtype=position_ids.dtype, device=position_ids.device)
+            else:
+                new_input_embeds_padded.append(torch.cat((
+                    cur_new_embed,
+                    torch.zeros((max_len - cur_len, cur_new_embed.shape[1]), dtype=cur_new_embed.dtype, device=cur_new_embed.device)
+                ), dim=0))
+                if cur_len > 0:
+                    new_labels_padded[i, :cur_len] = cur_new_labels
+                    attention_mask[i, :cur_len] = True
+                    position_ids[i, :cur_len] = torch.arange(0, cur_len, dtype=position_ids.dtype, device=position_ids.device)
+
+        new_input_embeds = torch.stack(new_input_embeds_padded, dim=0)
+
+        if _labels is None:
+            new_labels = None
+        else:
+            new_labels = new_labels_padded
+
+        if _attention_mask is None:
+            attention_mask = None
+        else:
+            attention_mask = attention_mask.to(dtype=_attention_mask.dtype)
+
+        if _position_ids is None:
+            position_ids = None
+
+        return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels

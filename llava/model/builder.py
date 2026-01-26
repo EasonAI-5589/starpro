@@ -28,6 +28,10 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
     use_mustdrop = kwargs.pop('use_mustdrop', False)
     mustdrop_config = kwargs.pop('mustdrop_config', {})
 
+    # Extract VScan configuration from kwargs
+    use_vscan = kwargs.pop('use_vscan', False)
+    vscan_config = kwargs.pop('vscan_config', {})
+
     kwargs = {"device_map": device_map, **kwargs}
 
     if device != "cuda":
@@ -126,6 +130,19 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                     from transformers import AutoConfig
                     mustdrop_cfg = AutoConfig.from_pretrained(model_path)
                     mustdrop_cfg.use_mustdrop = True
+                    # 🔥 Fix transformers 4.37+ compatibility: add missing config attributes
+                    # Old LLaVA checkpoints may lack these fields required by newer transformers
+                    if not hasattr(mustdrop_cfg, 'attention_dropout'):
+                        mustdrop_cfg.attention_dropout = 0.0
+                    if not hasattr(mustdrop_cfg, 'rope_theta'):
+                        mustdrop_cfg.rope_theta = 10000.0
+                    if not hasattr(mustdrop_cfg, 'rope_scaling'):
+                        mustdrop_cfg.rope_scaling = None
+                    if not hasattr(mustdrop_cfg, 'attention_bias'):
+                        mustdrop_cfg.attention_bias = False
+                    # 🔥 CRITICAL: MustDrop requires SDPA attention implementation for performance
+                    # Without this, it falls back to eager mode which is ~10x slower
+                    mustdrop_cfg._attn_implementation = 'sdpa'
                     model = MustDropLlavaLlamaForCausalLM.from_pretrained(
                         model_path,
                         low_cpu_mem_usage=True,
@@ -134,6 +151,45 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                     )
                     # Store MustDrop config for later use in generate()
                     model.mustdrop_config = mustdrop_config
+                # 🔬 VScan: Load VScan-enabled model when use_vscan=True
+                # Reference: https://github.com/Tencent/SelfEvolvingAgent/tree/main/VScan
+                elif use_vscan:
+                    print("Loading VScan LLaVA model (Training-Free Visual Token Reduction)...")
+                    from transformers import AutoConfig
+                    vscan_cfg = AutoConfig.from_pretrained(model_path)
+                    # Fix transformers 4.37+ compatibility
+                    if not hasattr(vscan_cfg, 'attention_dropout'):
+                        vscan_cfg.attention_dropout = 0.0
+                    if not hasattr(vscan_cfg, 'rope_theta'):
+                        vscan_cfg.rope_theta = 10000.0
+                    if not hasattr(vscan_cfg, 'rope_scaling'):
+                        vscan_cfg.rope_scaling = None
+                    if not hasattr(vscan_cfg, 'attention_bias'):
+                        vscan_cfg.attention_bias = False
+                    vscan_cfg._attn_implementation = 'sdpa'
+
+                    # Set VScan-specific config parameters
+                    vscan_cfg.use_vscan = True
+                    if 'stage1_tokens' not in vscan_config:
+                        vscan_config['stage1_tokens'] = 96
+                    if 'stage2_tokens' not in vscan_config:
+                        vscan_config['stage2_tokens'] = 32
+                    if 'prune_layer' not in vscan_config:
+                        num_layers = vscan_cfg.num_hidden_layers
+                        vscan_config['prune_layer'] = 16 if num_layers == 32 else 20
+
+                    model = LlavaLlamaForCausalLM_VScan.from_pretrained(
+                        model_path,
+                        low_cpu_mem_usage=True,
+                        config=vscan_cfg,
+                        vscan_config=vscan_config,
+                        **kwargs
+                    )
+                    # Store VScan config for later use
+                    model.vscan_config = vscan_config
+                    print(f"  Stage 1 tokens: {vscan_config['stage1_tokens']}")
+                    print(f"  Stage 2 tokens: {vscan_config['stage2_tokens']}")
+                    print(f"  Prune layer: {vscan_config['prune_layer']}")
                 else:
                     model = LlavaLlamaForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, **kwargs)
     else:
@@ -177,6 +233,15 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
         if device_map != 'auto':
             vision_tower.to(device=device_map, dtype=torch.float16)
         image_processor = vision_tower.image_processor
+
+    # 🔬 VScan: Additional runtime configuration (if model was loaded with VScan)
+    # Note: Main VScan config is now set during model loading above
+    if use_vscan and hasattr(model, 'vscan_config'):
+        # Set up Stage 2 parameters on model.model for runtime
+        model.model.layer_list = [vscan_config['prune_layer']]
+        model.model.image_token_list = [vscan_config['stage1_tokens'], vscan_config['stage2_tokens']]
+        model.model.visual_token_length = vscan_config['stage1_tokens']
+        model.model.visual_token_num = vscan_config['stage1_tokens']
 
     if hasattr(model.config, "max_sequence_length"):
         context_len = model.config.max_sequence_length

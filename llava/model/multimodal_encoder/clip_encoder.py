@@ -84,8 +84,62 @@ class CLIPVisionTower(nn.Module):
             return image_features, image_attentions
         return image_features
 
+    def forward_vscan(self, images, shallow_layer=5, deep_layer=-2):
+        """
+        Forward pass for VScan: returns multi-layer features and attentions.
+
+        VScan uses complementary scanning:
+        - Shallow layer (default: 5): Local spatial details via window CLS attention
+        - Deep layer (default: -2): Global semantic information
+
+        Args:
+            images: Input images tensor
+            shallow_layer: Layer index for local features (default: 5)
+            deep_layer: Layer index for global features (default: -2, i.e., second to last)
+
+        Returns:
+            dict with keys:
+                - 'shallow_features': Features from shallow layer (B, N, D)
+                - 'shallow_attentions': CLS attention from shallow layer (B, N)
+                - 'deep_features': Features from deep layer (B, N, D)
+                - 'deep_attentions': CLS attention from deep layer (B, N)
+        """
+        with torch.no_grad():
+            # Forward through vision tower with all hidden states and attentions
+            image_forward_outs = self.vision_tower(
+                images.to(device=self.device, dtype=self.dtype),
+                output_hidden_states=True,
+                output_attentions=True
+            )
+
+            # Get hidden states and attentions
+            hidden_states = image_forward_outs.hidden_states  # tuple of (B, 577, D)
+            attentions = image_forward_outs.attentions  # tuple of (B, num_heads, 577, 577)
+
+            # Shallow layer features and attentions
+            shallow_features = hidden_states[shallow_layer][:, 1:]  # Remove CLS token
+            shallow_attn = attentions[shallow_layer][:, :, 0, 1:]  # CLS to patch attention
+            shallow_attn = shallow_attn.mean(dim=1)  # Average across heads (B, N)
+
+            # Deep layer features and attentions
+            deep_features = hidden_states[deep_layer][:, 1:]  # Remove CLS token
+            deep_attn = attentions[deep_layer][:, :, 0, 1:]  # CLS to patch attention
+            deep_attn = deep_attn.mean(dim=1)  # Average across heads (B, N)
+
+            return {
+                'shallow_features': shallow_features.to(images.dtype),
+                'shallow_attentions': shallow_attn.to(images.dtype),
+                'deep_features': deep_features.to(images.dtype),
+                'deep_attentions': deep_attn.to(images.dtype),
+            }
+
     @torch.no_grad()
-    def forward(self, images, texts=None, output_attentions=False):
+    def forward(self, images, texts=None, output_attentions=False, vscan_mode=False,
+                shallow_layer=5, deep_layer=-2):
+        # VScan mode: return multi-layer features
+        if vscan_mode:
+            return self.forward_vscan(images, shallow_layer, deep_layer)
+
         if type(images) is list:
             image_features = []
             for image in images:

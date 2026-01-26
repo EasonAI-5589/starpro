@@ -8,3 +8,9 @@ from .language_model.llava_llama_mustdrop import (
     MustDropLlavaConfig,
     LlavaLlamaDynamicForCausalLM,  # Backward compatibility alias
 )
+
+# VScan integration
+from .language_model.llava_llama_vscan import (
+    LlavaLlamaForCausalLM_VScan,
+    VScanLlavaConfig,
+)

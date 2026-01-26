@@ -70,8 +70,10 @@ class MustDropLlavaLlamaForCausalLM(LlamaDynamicvitForCausalLM, LlavaMetaForCaus
     """
     config_class = MustDropLlavaConfig
 
-    def __init__(self, config):
+    def __init__(self, config, **kwargs):
         # Initialize parent class (LlamaDynamicvitForCausalLM)
+        # Note: kwargs may contain extra parameters like pruning_method, visual_token_num, etc.
+        # These are safely ignored here
         LlamaDynamicvitForCausalLM.__init__(self, config)
 
         # Replace model with MustDrop LLaVA model
@@ -87,6 +89,14 @@ class MustDropLlavaLlamaForCausalLM(LlamaDynamicvitForCausalLM, LlavaMetaForCaus
         self.key_set = None
         self.token_length_list = []
         self.pre_prompt_length_list = []
+
+        # Latency tracking (for compatibility with eval metrics)
+        self.start_latency = False
+        self.phase = "prefill"
+        self.start_event = torch.cuda.Event(enable_timing=True)
+        self.end_event = torch.cuda.Event(enable_timing=True)
+        self.prefill_latency = 0.0
+        self.decode_latency = 0.0
 
         # Initialize weights and apply final processing
         self.post_init()
