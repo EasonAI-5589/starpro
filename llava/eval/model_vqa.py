@@ -42,8 +42,6 @@ def eval_model(args):
     svdvlm_config = {"T": args.visual_token_num}
     use_prefixvlm = True if args.pruning_method == "prefixvlm" else False
     prefixvlm_config = {"T": args.visual_token_num}
-    use_holov2 = True if args.pruning_method == "HoloV_2" else False
-    holov2_config = {"T": args.visual_token_num}
     use_idea = True if args.pruning_method == "Idea" else False
     idea_config = {"T": args.visual_token_num}
     use_prefixvlm_2 = True if args.pruning_method == "prefixvlm_2" else False
@@ -97,7 +95,6 @@ def eval_model(args):
         use_d2p=use_d2p, d2p_config=d2p_config,
         use_svdvlm=use_svdvlm, svdvlm_config=svdvlm_config,
         use_prefixvlm=use_prefixvlm, prefixvlm_config=prefixvlm_config,
-        use_holov2=use_holov2, holov2_config=holov2_config,
         use_idea=use_idea, idea_config=idea_config,
         use_prefixvlm_2=use_prefixvlm_2, prefixvlm_2_config=prefixvlm_2_config,
         use_pdrop=use_pdrop, pdrop_config=pdrop_config,

@@ -18,7 +18,6 @@ from .modeling_llama_sparsevlm import SparseLlamaModel
 from .modeling_llama_divdriven import D2PLlamaModel
 from .modeling_llama_svd import SVDLlamaModel
 from .modeling_llama_prefix import PrefixLlamaModel
-from .modeling_llama_holov2 import HoloV_2_LlamaModel
 from .modeling_llama_idea import IdeaLlamaModel
 from .modeling_llama_prefix_2 import Prefix_2_LlamaModel
 from .modeling_llama_pdrop import PDropLlamaModel
@@ -77,15 +76,6 @@ class PrefixLlavaLlamaModel(LlavaMetaModel, PrefixLlamaModel):
     
     def __init__(self, config: LlamaConfig, prefixvlm_config: dict):
         super(PrefixLlavaLlamaModel, self).__init__(config, prefixvlm_config=prefixvlm_config)
-# -------------------------------------------------------------------------
-
-# -------------------------------------------------------------------------
-# HoloV_2: HoloV_2 baseline
-class HoloV_2_LlavaLlamaModel(LlavaMetaModel, HoloV_2_LlamaModel):
-    config_class = LlavaLlamaConfig
-    
-    def __init__(self, config: LlamaConfig, holov2_config: dict):
-        super(HoloV_2_LlavaLlamaModel, self).__init__(config, holov2_config=holov2_config)
 # -------------------------------------------------------------------------
 
 # -------------------------------------------------------------------------
@@ -168,7 +158,6 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                  use_svdvlm=False, svdvlm_config=None,
                  use_prefixvlm=False, prefixvlm_config=None,
                  use_d2p=False, d2p_config=None,
-                 use_holov2=False, holov2_config=None,
                  use_idea=False, idea_config=None,
                  use_prefixvlm_2=False, prefixvlm_2_config=None,
                  use_pdrop=False, pdrop_config=None,
@@ -205,9 +194,6 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         elif use_prefixvlm:
             print(f"Use PrefixVLM: {prefixvlm_config}")
             self.model = PrefixLlavaLlamaModel(config, prefixvlm_config=prefixvlm_config)
-        elif use_holov2:
-            print(f"Use HoloV_2: {holov2_config}")
-            self.model = HoloV_2_LlavaLlamaModel(config, holov2_config=holov2_config)
         elif use_idea:
             print(f"Use Idea: {idea_config}")
             self.model = Idea_LlavaLlamaModel(config, idea_config=idea_config)
