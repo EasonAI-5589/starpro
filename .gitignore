@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pre_duet
+_duet_*.py
+# eval artifacts / logs
+results/
+playground/data/eval/*/answers/
+# never commit weights or bulk data
+*.bin
+*.pth
+*.pt
+*.safetensors
