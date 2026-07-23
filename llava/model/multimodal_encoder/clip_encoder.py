@@ -39,29 +39,44 @@ class CLIPVisionTower(nn.Module):
 
         self.is_loaded = True
 
+    def _resolve_device(self, device_map):
+        """把 device_map（str / dict / None）归一成一个具体的 torch.device。
+
+        device_map 可能是 'auto'、'cuda:0'，也可能是 builder 传来的 {"": 0}。
+        text tower 必须和 vision tower 落在同一张卡上，否则后面算 cos 相似度时
+        image_embeds(GPU) 和 text_embeds(CPU) 会设备不匹配。
+        """
+        if device_map is None:
+            return None
+        if isinstance(device_map, dict):
+            device_map = device_map.get("", "cuda")
+        if isinstance(device_map, int):
+            return torch.device(f"cuda:{device_map}")
+        if isinstance(device_map, str):
+            return torch.device(device_map if device_map != 'auto' else 'cuda')
+        return None
+
     def load_text_tower(self, device_map=None):
         # 方案1: 不传递 device_map，之后手动移动到设备
         vision_tower_with_projection = CLIPVisionModelWithProjection.from_pretrained(
             self.vision_tower_name
         )
-        
-        # 如果需要移动到特定设备
-        if device_map is not None and isinstance(device_map, str):
-            device = torch.device(device_map if device_map != 'auto' else 'cuda')
+
+        device = self._resolve_device(device_map)
+        if device is not None:
             vision_tower_with_projection = vision_tower_with_projection.to(device)
-        
+
         self.vision_tower.visual_projection = vision_tower_with_projection.visual_projection
 
         self.text_tokenizer = CLIPTokenizerFast.from_pretrained(self.vision_tower_name)
-        
+
         # 同样处理 text tower
         self.text_tower = CLIPTextModelWithProjection.from_pretrained(
             self.vision_tower_name
         )
-        if device_map is not None and isinstance(device_map, str):
-            device = torch.device(device_map if device_map != 'auto' else 'cuda')
+        if device is not None:
             self.text_tower = self.text_tower.to(device)
-        
+
         self.text_tower.requires_grad_(False)
 
         self.max_position_embeddings = self.text_tower.config.max_position_embeddings
@@ -200,7 +215,8 @@ class CLIPVisionTower(nn.Module):
 
                 # Move tensors to correct devices
                 image_embeds = self.vision_tower.vision_model.post_layernorm(image_outputs.to(post_ln_device))
-                image_embeds = self.vision_tower.visual_projection(image_embeds.float().to(projection_device))
+                proj_dtype = next(self.vision_tower.visual_projection.parameters()).dtype
+                image_embeds = self.vision_tower.visual_projection(image_embeds.to(dtype=proj_dtype, device=projection_device))
                 image_features = (image_features, image_embeds, text_embeds)
 
         return image_features

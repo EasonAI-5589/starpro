@@ -183,6 +183,9 @@ def benchmark_performance(args):
         "debug": False,  # Disable debug prints for benchmarking
     }
 
+    use_prefixvlm_2 = True if args.pruning_method == "prefixvlm_2" else False
+    prefixvlm_2_config = {"T": args.visual_token_num}
+
     use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method or args.pruning_method == "star_pro" else False
 
     print(f"\n{'='*70}")
@@ -203,6 +206,7 @@ def benchmark_performance(args):
         use_sparsevlm=use_sparsevlm, sparsevlm_config=sparsevlm_config,
         use_pdrop=use_pdrop, pdrop_config=pdrop_config,
         use_star=use_star, star_config=star_config,
+        use_prefixvlm_2=use_prefixvlm_2, prefixvlm_2_config=prefixvlm_2_config,
         use_text_tower=use_text_tower,
     )
 

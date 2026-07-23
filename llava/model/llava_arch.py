@@ -139,10 +139,10 @@ class LlavaMetaForCausalLM(ABC):
         return self.get_model().get_vision_tower()
 
     def encode_images(self, images, texts=None):
-        if 'prumerge' in self.pruning_method or self.pruning_method == 'visionzip' or self.pruning_method == 'fastervlm':
-            image_features, image_attentions, image_keys, image_cls = self.get_model().get_vision_tower()(images, output_attentions=True)
+        if 'prumerge' in self.pruning_method or self.pruning_method == 'visionzip' or self.pruning_method == 'fastervlm' or self.pruning_method == 'scope' or self.pruning_method == 'prefixvlm' or self.pruning_method == 'HoloV' or self.pruning_method == 'Idea' or self.pruning_method == 'prefixvlm_2' or self.pruning_method == 'svdvlm' or self.pruning_method == 'd2p' :
+                image_features, image_attentions, image_keys, image_cls = self.get_model().get_vision_tower()(images, output_attentions=True)
         elif self.pruning_method == 'trim' or self.pruning_method == 'cdp3' or 'thcp' in self.pruning_method or self.pruning_method == 'star_pro':
-            image_features, image_embeds, text_embeds = self.get_model().get_vision_tower()(images, texts=texts)
+                image_features, image_embeds, text_embeds = self.get_model().get_vision_tower()(images, texts=texts)
         elif self.pruning_method == 'mustdrop':
             # 🔥 MustDrop: Vision Tower returns (image_features, key_set)
             # Reference: clip_encoder_mustdrop.py CLIPVisionTowerMustDrop.forward()
@@ -271,7 +271,28 @@ class LlavaMetaForCausalLM(ABC):
 
             index_masks = torch.zeros(B, N, dtype=torch.bool, device=device)
             index_masks.scatter_(1, topk_idx, True)
-        
+
+        elif self.pruning_method == 'scope':
+            # SCOPE: Saliency-Coverage Oriented Token Pruning (NeurIPS 2025)
+            # Reference: https://github.com/kinredon/SCOPE
+            from llava.model.language_model.scope_utils import scope_select_with_env
+
+            # 官方写法: cls_attention_sum = attn_weights[:, :, cls_idx, cls_idx+1:].sum(dim=1)
+            cls_attn = image_attentions.sum(dim=1)  # [B, N] sum across heads (同官方)
+
+            # SCOPE selection: jointly model saliency (CLS attention) and coverage (diversity)
+            selected_idx, _ = scope_select_with_env(
+                visual_features=image_features,  # [B, N, C]
+                num_tokens=self.visual_token_num,
+                cls_attn=cls_attn
+            )
+
+            # Sort indices to maintain spatial order
+            selected_idx = torch.sort(selected_idx, dim=1).values
+
+            index_masks = torch.zeros(B, N, dtype=torch.bool, device=device)
+            index_masks.scatter_(1, selected_idx, True)
+
         elif self.pruning_method == 'trim':
             image_embeds = image_embeds / image_embeds.norm(dim=-1, keepdim=True)
             text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
@@ -314,10 +335,16 @@ class LlavaMetaForCausalLM(ABC):
             index_masks = torch.zeros(B, N, dtype=torch.bool, device=device)
             index_masks.scatter_(1, retained_idx, True)
         
+        #----------------------------------------------------------------------------------------------
         image_features = self.get_model().mm_projector(image_features)
+        #----------------------------------------------------------------------------------------------
 
         if merged_features is not None:
             merged_features = self.get_model().mm_projector(merged_features)
+
+        # Token library: all_features_raw is already 4096-dim (post mm_projector), just rename
+        if self.pruning_method == 'Idea' and hasattr(self, '_idea_token_library'):
+            self._idea_token_library['all_features'] = self._idea_token_library.pop('all_features_raw')
 
         # ========== 在这里添加设备同步 ==========
         # 确保 index_masks 与 image_features 在同一设备上
@@ -1247,172 +1274,200 @@ class LlavaMetaForCausalLM(ABC):
                 print(f"\n{'='*80}\n")
 
         elif self.pruning_method == 'star_pro':
-            # STAR-PRO: Two-Stage Framework with THCP Stage 1 (Adaptive)
-            # Stage 1 (here): THCP pruning → keep target*2 tokens (adaptive to final target)
-            # Stage 2 (in modeling_llama_star): Progressive pruning → target*2 → target
-
-            # ========== Debug配置 ==========
-            # Read from environment variable (set in run_stage1_lambda.sh)
+            # ═══════════════════════════════════════════════════════════
+            # STAR-PRO Stage 1: Complementarity-Diversity Greedy Selection
+            #
+            # Selects m₁ = 2×target tokens from vision encoder output.
+            # Score: I_i(S) = C_i + λ·D_i(S)
+            #   C_i = normalize(1 - cos(v_i, t))   (complementarity)
+            #   D_i = 1 - max_{j∈S} cos(v_i, v_j)  (diversity)
+            #   λ = diversity weight (default 1.0)
+            # ═══════════════════════════════════════════════════════════
             import os
+            # Support both new (LAMBDA/DIVERSITY_WEIGHT) and legacy (RELEVANCE_WEIGHT) env vars
+            lambda_val = float(os.environ.get('LAMBDA', os.environ.get('DIVERSITY_WEIGHT', '1.0')))
+            negate = os.environ.get('NEGATE_RELEVANCE', '1') == '1'
             enable_debug = os.environ.get('ENABLE_DEBUG', '0') == '1'
 
-            if enable_debug:
-                print(f"\n{'='*80}")
-                print(f"STAR-PRO Stage 1: THCP Text-Concept Coverage (Adaptive)")
-                print(f"{'='*80}")
+            stage1_mult = float(os.environ.get("STAGE1_MULT", "2"))
+            stage1_keep = int(self.visual_token_num * stage1_mult)  # target×mult
 
-            # ========== 检测 anyres 多 patch 情况 ==========
-            is_anyres_multi_patch = (B > 1 and
-                                     getattr(self.config, 'image_aspect_ratio', 'square') == 'anyres')
+            # Anyres: distribute tokens proportionally across patches
+            tokens_per_patch = stage1_keep // B if (B > 1 and getattr(self.config, 'image_aspect_ratio', 'square') == 'anyres') else stage1_keep
 
-            # ========== 超参数配置（与THCP一致，使用Lambda） ==========
-            # Stage 1 (THCP) Lambda Ablation Support
-            # Formula: L_i(S) = R_i + λ × D_i(S)
-            # λ=0.5 → R+0.5D, λ=1.0 → R+1.0D, λ=2.0 → R+2.0D
-            import os
-            lambda_val = float(os.environ.get('LAMBDA', '1.0'))
-
-            # Paper's original formula: R + λD
-            coverage_weight = 1.0              # Relevance/Coverage weight (fixed at 1.0)
-            relevance_weight = 1.0             # Relevance weight in M=1 mode (fixed at 1.0)
-            diversity_weight = lambda_val      # Diversity weight = λ
-
-            M = text_embeds.shape[0]
-            text_normalized = text_embeds / (text_embeds.norm(dim=-1, keepdim=True) + 1e-8)
-
-            # 🔥 STAR-PRO Adaptive: Stage 1 keeps target*2 tokens (not fixed 50%)
-            stage1_keep_num = self.visual_token_num * 2  # e.g., target=128 → keep 256, target=640 → keep 1280
-
-            # 🔥 Anyres 多 patch：每个 patch 按比例分配 tokens
-            if is_anyres_multi_patch:
-                tokens_per_patch = stage1_keep_num // B
-                if enable_debug:
-                    print(f"[Anyres Multi-Patch Detected]")
-                    print(f"  {B} patches × {N} tokens/patch = {B * N} total tokens")
-                    print(f"  Each patch keeps: {tokens_per_patch} tokens")
-                    print(f"  Total after Stage 1: {tokens_per_patch * B} tokens")
-            else:
-                tokens_per_patch = stage1_keep_num
-
-            if enable_debug:
-                print(f"\n[Lambda Configuration]")
-                print(f"  λ (lambda): {lambda_val}")
-                print(f"  Formula: L_i(S) = (1-λ)R_i + λD_i(S)")
-                print(f"  Relevance weight (1-λ): {relevance_weight}")
-                print(f"  Diversity weight (λ): {diversity_weight}")
-
-                print(f"\n[Stage 1 Config - Adaptive to Target]")
-                print(f"  Original tokens per patch: {N}")
-                print(f"  Stage 1 keeps per patch: {tokens_per_patch}")
-                print(f"  Final target: {self.visual_token_num}")
-                print(f"  Text tokens (M): {M}")
-
-            # 判断使用哪种模式（与THCP完全一致）
-            use_coverage_mode = (M > 1)
-            if enable_debug:
-                print(f"  THCP Mode: {'Coverage (M>1)' if use_coverage_mode else 'Relevance (M=1)'}")
+            # Normalize embeddings
+            text_norm = text_embeds / (text_embeds.norm(dim=-1, keepdim=True) + 1e-8)  # (M, C)
 
             all_masks = []
-
             for b in range(B):
-                image_emb_b = image_embeds[b].to(device)  # (N, C) - ensure on correct device
-                image_emb_b_norm = image_emb_b / (image_emb_b.norm(dim=-1, keepdim=True) + 1e-8)
+                # Complementarity: C_i = normalize(±cos(v_i, t))
+                emb_norm = image_embeds[b] / (image_embeds[b].norm(dim=-1, keepdim=True) + 1e-8)
+                cos_sim = torch.matmul(emb_norm, text_norm.t()).mean(dim=-1)  # (N,)
+                C = -cos_sim if negate else cos_sim
+                C = (C - C.min() + 1e-6) / (C.max() - C.min())  # min-max normalize to [0,1]
 
-                # 计算文本-视觉响应矩阵
-                response_matrix = torch.matmul(image_emb_b_norm, text_normalized.to(device).t())  # (N, M)
+                # Precompute visual similarity for diversity
+                feat_norm = image_features[b] / (image_features[b].norm(dim=-1, keepdim=True) + 1e-8)
+                vis_sim = torch.matmul(feat_norm, feat_norm.t())  # (N, N)
 
-                selected_indices = []
-                available_mask = torch.ones(N, dtype=torch.bool, device=device)
+                # Greedy selection
+                selected = []
+                available = torch.ones(N, dtype=torch.bool, device=device)
 
-                # 预计算视觉相似度矩阵
-                visual_feat_b = image_features[b].to(device)  # (N, D) - ensure on correct device
-                visual_feat_b_norm = visual_feat_b / (visual_feat_b.norm(dim=-1, keepdim=True) + 1e-8)
-                visual_similarity = torch.matmul(visual_feat_b_norm, visual_feat_b_norm.t())  # (N, N)
+                # Optional recovered Stage-1 selectors from the lost
+                # aaai27valc branch. Default stays greedy, so baseline behavior
+                # is unchanged unless STAGE1_SCORER is set.
+                _s1_scorer = os.environ.get('STAGE1_SCORER', 'greedy')
+                _s1_alt_done = False
+                if _s1_scorer in ('leverage', 'qr', 'qr_centered', 'random', 'stride'):
+                    import sys as _sys
+                    try:
+                        _X = image_features[b].detach().to(torch.float32)
+                        if _s1_scorer == 'qr_centered':
+                            _X = _X - _X.mean(dim=0, keepdim=True)
+                            if b == 0:
+                                print('[STAR-PRO S1 SCORER] qr_centered: mean-centered features before pivoted QR (patch 20260724)', file=_sys.stderr, flush=True)
+                        _k = min(tokens_per_patch, N)
 
-                if use_coverage_mode:
-                    # ==================== THCP Coverage Mode (M > 1) ====================
-                    # 计算文本重要性：结合视觉激活度和文本唯一性
-                    text_visual_activation = response_matrix.max(dim=0).values
-                    text_sim_matrix = torch.matmul(text_normalized, text_normalized.t())
-                    text_uniqueness = 1 - (text_sim_matrix.sum(dim=-1) - 1) / max(M - 1, 1)
-                    text_importance = 0.7 * text_visual_activation + 0.3 * text_uniqueness
-                    text_importance = text_importance / (text_importance.sum() + 1e-8)
+                        if _s1_scorer == 'random':
+                            _seed = int(os.environ.get('STAGE1_RAND_SEED', '0'))
+                            _h = int(torch.sum(
+                                _X.reshape(-1)[::997].double()
+                                * 1e6).abs().item()) % (2 ** 31)
+                            _g = torch.Generator(device='cpu')
+                            _g.manual_seed((_seed * 1000003 + _h) % (2 ** 63 - 1))
+                            selected = torch.randperm(
+                                N, generator=_g)[:_k].tolist()
 
-                    text_coverage = torch.zeros(M, device=device)
+                        elif _s1_scorer == 'stride':
+                            _H = int(round(N ** 0.5))
+                            if _H * _H == N and _k < N:
+                                _nr = max(1, min(_H, int(round(_k ** 0.5))))
+                                _nc = max(1, min(_H, -(-_k // _nr)))
+                                _rows = torch.round(torch.linspace(
+                                    0, _H - 1, _nr)).long().tolist()
+                                _cols = torch.round(torch.linspace(
+                                    0, _H - 1, _nc)).long().tolist()
+                                _rows = sorted(set(_rows))
+                                _cols = sorted(set(_cols))
+                                _idx = [r * _H + c for r in _rows for c in _cols]
+                                if len(_idx) > _k:
+                                    _sub = torch.round(torch.linspace(
+                                        0, len(_idx) - 1, _k)).long().tolist()
+                                    _idx = [_idx[_j] for _j in sorted(set(_sub))]
+                            else:
+                                _idx = torch.round(torch.linspace(
+                                    0, N - 1, _k)).long().tolist()
+                            _seen, _picks = set(), []
+                            for _x in _idx:
+                                if _x not in _seen:
+                                    _seen.add(_x)
+                                    _picks.append(_x)
+                            for _x in range(N):
+                                if len(_picks) >= _k:
+                                    break
+                                if _x not in _seen:
+                                    _seen.add(_x)
+                                    _picks.append(_x)
+                            selected = _picks[:_k]
 
-                    # 🔥 THCP贪心算法：选择 tokens_per_patch 个tokens
-                    for step in range(tokens_per_patch):
-                        if not available_mask.any():
-                            break
+                        elif _s1_scorer == 'leverage':
+                            _r = int(os.environ.get('STAGE1_SVD_RANK', '64'))
+                            _r = max(1, min(_r, min(_X.shape[0], _X.shape[1])))
+                            _U = torch.linalg.svd(_X, full_matrices=False).U
+                            _lev = (_U[:, :_r] ** 2).sum(dim=1)
+                            if not torch.isfinite(_lev).all():
+                                raise ValueError('non-finite leverage scores')
+                            selected = torch.argsort(
+                                _lev, descending=True, stable=True)[:_k].tolist()
 
-                        if step == 0:
-                            # 第一步：选择覆盖最多重要文本的token
-                            coverage_scores = (response_matrix * text_importance.unsqueeze(0)).sum(dim=-1)
-                            scores = coverage_scores
                         else:
-                            # 后续步骤：平衡文本覆盖增益和视觉多样性
-                            new_coverage = torch.maximum(text_coverage.unsqueeze(0), response_matrix)
-                            coverage_gain = (new_coverage - text_coverage.unsqueeze(0)) * text_importance.unsqueeze(0)
-                            total_coverage_gain = coverage_gain.sum(dim=-1)
+                            _norms2_0 = (_X ** 2).sum(dim=1)
+                            if not torch.isfinite(_norms2_0).all():
+                                raise ValueError('non-finite token norms')
+                            _R = _X.clone()
+                            _avail = torch.ones(
+                                N, dtype=torch.bool, device=_X.device)
+                            _picks = []
+                            _eps = 1e-8
+                            while len(_picks) < _k:
+                                _rn = (_R ** 2).sum(dim=1)
+                                _rn = torch.where(
+                                    _avail, _rn, torch.full_like(_rn, -1.0))
+                                _i = int(torch.argmax(_rn).item())
+                                if _rn[_i] <= _eps:
+                                    _rest = torch.nonzero(_avail).flatten()
+                                    _rest = _rest[torch.argsort(
+                                        _norms2_0[_rest], descending=True,
+                                        stable=True)]
+                                    _picks.extend(
+                                        int(_x) for _x in
+                                        _rest[:_k - len(_picks)].tolist())
+                                    break
+                                _picks.append(_i)
+                                _avail[_i] = False
+                                _q = _R[_i] / _R[_i].norm()
+                                _R = _R - torch.outer(_R @ _q, _q)
+                            selected = [int(_i) for _i in _picks]
 
-                            selected_tensor = torch.tensor(selected_indices, device=device)
-                            max_similarity_to_selected = visual_similarity[:, selected_tensor].max(dim=1).values
-                            diversity_scores = 1 - max_similarity_to_selected
+                        if len(selected) != _k or len(set(selected)) != _k:
+                            raise ValueError(
+                                f'bad selection size {len(selected)} '
+                                f'(want {_k})')
+                        available[torch.tensor(selected, device=device)] = False
+                        _s1_alt_done = True
+                        print(f"[STAR-PRO S1 SCORER] scorer={_s1_scorer}"
+                              + (f" rank={_r}" if _s1_scorer == 'leverage'
+                                 else "")
+                              + f" selected={len(selected)}/{N}",
+                              file=_sys.stderr, flush=True)
+                    except Exception as _e:
+                        print(f"[STAR-PRO S1 SCORER] WARNING: scorer="
+                              f"{_s1_scorer} failed ({_e}); falling back to "
+                              f"greedy", file=_sys.stderr, flush=True)
+                        selected = []
+                        available = torch.ones(
+                            N, dtype=torch.bool, device=device)
+                        _s1_alt_done = False
 
-                            scores = coverage_weight * total_coverage_gain + diversity_weight * diversity_scores
-
-                        scores[~available_mask] = -float('inf')
-                        selected_idx = torch.argmax(scores).item()
-                        selected_indices.append(selected_idx)
-                        available_mask[selected_idx] = False
-                        text_coverage = torch.maximum(text_coverage, response_matrix[selected_idx])
-
-                else:
-                    # ==================== THCP Relevance Mode (M = 1) ====================
-                    # 计算文本相关性（取负并归一化）
-                    text_relevance = response_matrix.squeeze(-1)  # (N,)
-                    text_relevance = -text_relevance  # 与THCP一致
-                    text_relevance = (text_relevance - text_relevance.min() + 1e-6) / (text_relevance.max() - text_relevance.min())
-
-                    # 🔥 THCP贪心算法：平衡相关性和多样性
+                if not _s1_alt_done:
+                    if enable_debug:
+                        print("[STAR-PRO S1 SCORER] scorer=greedy "
+                              f"selected={min(tokens_per_patch, N)}/{N}")
                     for step in range(tokens_per_patch):
-                        if not available_mask.any():
+                        if not available.any():
                             break
-
                         if step == 0:
-                            # 第一步：选择相关性最高的token
-                            scores = text_relevance.clone()
+                            scores = C.clone()  # First token: highest complementarity
                         else:
-                            # 后续步骤：平衡文本相关性和视觉多样性
-                            selected_tensor = torch.tensor(selected_indices, device=device)
-                            relevance_scores = text_relevance.clone()
-                            max_similarity_to_selected = visual_similarity[:, selected_tensor].max(dim=1).values
-                            diversity_scores = 1 - max_similarity_to_selected
-                            scores = relevance_weight * relevance_scores + diversity_weight * diversity_scores
+                            sel_t = torch.tensor(selected, device=device)
+                            D = 1 - vis_sim[:, sel_t].max(dim=1).values  # diversity
+                            scores = C + lambda_val * D
+                        scores[~available] = -float('inf')
+                        idx = scores.argmax().item()
+                        selected.append(idx)
+                        available[idx] = False
 
-                        scores[~available_mask] = -float('inf')
-                        selected_idx = torch.argmax(scores).item()
-                        selected_indices.append(selected_idx)
-                        available_mask[selected_idx] = False
+                mask = torch.zeros(N, dtype=torch.bool, device=device)
+                mask[torch.tensor(selected, device=device)] = True
+                all_masks.append(mask)
+                if b == 0 and _s1_alt_done and _s1_scorer in ("qr", "qr_centered", "random"):
+                    try:
+                        _sel_list = [int(x) for x in selected]
+                        _rank_by_grid = {g: r for r, g in enumerate(_sel_list)}
+                        _slot_order = sorted(_sel_list)
+                        _qr_rank = torch.tensor([_rank_by_grid[g] for g in _slot_order], device=device)
+                        self.get_model()._qr_pivot_rank = _qr_rank
+                        if os.environ.get("QR_OVERLAP_DIAG", "0") == "1" or os.environ.get("STAGE2_ANCHOR_VERBOSE", "0") == "1":
+                            import sys as _sysd
+                            print("[QR-OVERLAP-DIAG] stage1 stash slots=" + str(int(_qr_rank.numel())) + " scorer=" + str(_s1_scorer), file=_sysd.stderr, flush=True)
+                    except Exception:
+                        pass
 
-                # 构建mask（关键：保持 (N,) 维度，和THCP一样）
-                batch_mask = torch.zeros(N, dtype=torch.bool, device=device)
-                batch_mask[torch.tensor(selected_indices, device=device)] = True
-                all_masks.append(batch_mask)
-
-            # 🔥 关键：生成 (B, N) 的 index_masks
-            index_masks = torch.stack(all_masks, dim=0)
+            index_masks = torch.stack(all_masks, dim=0)  # (B, N)
 
             if enable_debug:
-                print(f"\n[Stage 1 Output - THCP Selection Complete]")
-                print(f"  index_masks shape: {index_masks.shape}  # (B, N)")
-                print(f"  Selected tokens per batch: {index_masks.sum(dim=1).tolist()}")
-                print(f"  image_features shape: {image_features.shape}  # (B, N, D)")
-                print(f"  ✓ THCP Stage 1 complete")
-                print(f"  ✓ Ready for mm_projector")
-                print(f"  ✓ Ready for Stage 2 progressive pruning in modeling_llama_star")
-                print(f"{'='*80}\n")
-
+                print(f"[STAR-PRO S1] {N}→{tokens_per_patch} tokens/patch | λ={lambda_val} negate={negate}")
         elif self.pruning_method == 'star_v5':
             # STAR-V5: S2 Only Ablation (Skip Stage 1 THCP, Progressive Pruning Only)
             # Stage 1 (here): SKIP THCP, keep all 576 (or 2880) tokens
@@ -1648,6 +1703,566 @@ class LlavaMetaForCausalLM(ABC):
                 print(f"  Output shape: {image_features.shape}")
                 print(f"  Ready for Stage 2 text-guided progressive pruning")
                 print(f"{'='*80}\n")
+                
+        #----------------------------------------------------------------------------------------------
+        #相比于原来的方法，添加了除以均值的操作
+        elif self.pruning_method == 'd2p':
+            # PrefixVLM S1: Greedy selection with (CLS-attn importance) + (diversity / low similarity)
+            import os
+            div_1 = float(os.environ.get("DIV_1", "0.5"))
+            enable_debug = os.environ.get("ENABLE_DEBUG", "0") == "1"
+
+            # keep half tokens
+            # Now:target=128->STAGE1_KEEP=288
+            # Now:target=64->STAGE1_KEEP=288
+            # Now:target=32->STAGE1_KEEP=152 32特殊，需要在.sh中设置STAGE1_KEEP=152
+            stage1_keep = int(os.environ.get("STAGE1_KEEP", "288"))
+            tokens_per_patch = stage1_keep // B if (B > 1 and getattr(self.config, "image_aspect_ratio", "square") == "anyres") else stage1_keep
+
+            # -------- CLS attention importance a_i --------
+            # image_attentions: expected shape (B, H, N) or (B, N)
+            if image_attentions.dim() == 3:
+                cls_attn = image_attentions.mean(dim=1)  # (B, N) mean over heads
+            elif image_attentions.dim() == 2:
+                cls_attn = image_attentions             # (B, N)
+            else:
+                raise ValueError(f"[prefixvlm] Unexpected image_attentions shape: {tuple(image_attentions.shape)}")
+            # normalize to [0,1] per-sample
+            cls_attn = (cls_attn - cls_attn.min(dim=1, keepdim=True).values) / (
+                cls_attn.max(dim=1, keepdim=True).values - cls_attn.min(dim=1, keepdim=True).values + 1e-8
+            )  # (B, N)
+
+            all_masks = []
+            for b in range(B):
+                a = cls_attn[b]  # (N,)
+
+                # -------- similarity matrix s_ij --------
+                # use image_features (or image_keys if you prefer) for diversity
+                feat = image_features[b]  # (N, C)
+                feat_norm = feat / (feat.norm(dim=-1, keepdim=True) + 1e-8)
+                vis_sim = torch.matmul(feat_norm, feat_norm.t())  # (N, N), cosine in [-1,1]
+
+                selected = []
+                available = torch.ones(N, dtype=torch.bool, device=device)
+
+                # step0: pick highest attention
+                i0 = torch.argmax(a).item()
+                selected.append(i0)
+                available[i0] = False
+
+                # maintain max similarity to selected set: m_i = max_{j in S} s_ij
+                max_sim_to_S = vis_sim[:, i0]  # (N,)
+
+                # greedy fill
+                for step in range(1, tokens_per_patch):
+                    if not available.any():
+                        break
+
+                    diversity = 1.0 - max_sim_to_S  # higher is better (less redundant)
+                    scores = div_1 * (a/a.mean()) + diversity/diversity.mean()
+
+                    scores[~available] = -float("inf")
+                    idx = torch.argmax(scores).item()
+
+                    selected.append(idx)
+                    available[idx] = False
+                    max_sim_to_S = torch.maximum(max_sim_to_S, vis_sim[:, idx])
+
+                # build mask
+                selected_t = torch.tensor(selected, device=device, dtype=torch.long)
+                selected_t = torch.sort(selected_t).values  # keep spatial/order consistency
+                mask = torch.zeros(N, dtype=torch.bool, device=device)
+                mask[selected_t] = True
+                all_masks.append(mask)
+
+                if enable_debug and b == 0:
+                    # quick stats
+                    sel_a_mean = a[selected_t].mean().item()
+                    if selected_t.numel() > 1:
+                        sub = vis_sim[selected_t][:, selected_t]
+                        off = sub[~torch.eye(selected_t.numel(), dtype=torch.bool, device=device)]
+                        avg_sim = off.mean().item()
+                    else:
+                        avg_sim = 0.0
+                    print(f"[S1] div_1={div_1} truly_keep={selected_t.numel()} | attn_mean={sel_a_mean:.4f} | avg_pair_sim={avg_sim:.4f}")
+
+            index_masks = torch.stack(all_masks, dim=0)  # (B, N)
+
+            if enable_debug:
+                print(f"[S1] {N}→{tokens_per_patch} tokens/patch | div_1={div_1}")
+                print(f"[S1] stage1_keep: {stage1_keep}")
+        
+        
+        elif self.pruning_method == 'svdvlm':
+            # PrefixVLM S1: Greedy selection with (CLS-attn importance) + (diversity / low similarity)
+            import os
+            alpha_val = float(os.environ.get("ALPHA", "0.5"))
+            enable_debug = os.environ.get("ENABLE_DEBUG", "0") == "1"
+
+            # keep half tokens
+            stage1_keep = N // 2
+            tokens_per_patch = stage1_keep // B if (B > 1 and getattr(self.config, "image_aspect_ratio", "square") == "anyres") else stage1_keep
+
+            # -------- CLS attention importance a_i --------
+            # image_attentions: expected shape (B, H, N) or (B, N)
+            if image_attentions.dim() == 3:
+                cls_attn = image_attentions.mean(dim=1)  # (B, N) mean over heads
+            elif image_attentions.dim() == 2:
+                cls_attn = image_attentions             # (B, N)
+            else:
+                raise ValueError(f"[svdvlm] Unexpected image_attentions shape: {tuple(image_attentions.shape)}")
+            # normalize to [0,1] per-sample
+            cls_attn = (cls_attn - cls_attn.min(dim=1, keepdim=True).values) / (
+                cls_attn.max(dim=1, keepdim=True).values - cls_attn.min(dim=1, keepdim=True).values + 1e-8
+            )  # (B, N)
+
+            all_masks = []
+            for b in range(B):
+                a = cls_attn[b]  # (N,)
+
+                # -------- similarity matrix s_ij --------
+                # use image_features (or image_keys if you prefer) for diversity
+                feat = image_features[b]  # (N, C)
+                feat_norm = feat / (feat.norm(dim=-1, keepdim=True) + 1e-8)
+                vis_sim = torch.matmul(feat_norm, feat_norm.t())  # (N, N), cosine in [-1,1]
+
+                selected = []
+                available = torch.ones(N, dtype=torch.bool, device=device)
+
+                # step0: pick highest attention
+                i0 = torch.argmax(a).item()
+                selected.append(i0)
+                available[i0] = False
+
+                # maintain max similarity to selected set: m_i = max_{j in S} s_ij
+                max_sim_to_S = vis_sim[:, i0]  # (N,)
+
+                # greedy fill
+                for step in range(1, tokens_per_patch):
+                    if not available.any():
+                        break
+
+                    diversity = 1.0 - max_sim_to_S  # higher is better (less redundant)
+                    scores = (1-alpha_val) * (a/a.mean()) + alpha_val * (diversity/diversity.mean())
+
+                    scores[~available] = -float("inf")
+                    idx = torch.argmax(scores).item()
+
+                    selected.append(idx)
+                    available[idx] = False
+                    max_sim_to_S = torch.maximum(max_sim_to_S, vis_sim[:, idx])
+
+                # build mask
+                selected_t = torch.tensor(selected, device=device, dtype=torch.long)
+                selected_t = torch.sort(selected_t).values  # keep spatial/order consistency
+                mask = torch.zeros(N, dtype=torch.bool, device=device)
+                mask[selected_t] = True
+                all_masks.append(mask)
+
+                if enable_debug and b == 0:
+                    # quick stats
+                    sel_a_mean = a[selected_t].mean().item()
+                    if selected_t.numel() > 1:
+                        sub = vis_sim[selected_t][:, selected_t]
+                        off = sub[~torch.eye(selected_t.numel(), dtype=torch.bool, device=device)]
+                        avg_sim = off.mean().item()
+                    else:
+                        avg_sim = 0.0
+                    print(f"[SVDVLMS1] alpha_val={alpha_val} truly_keep={selected_t.numel()} | attn_mean={sel_a_mean:.4f} | avg_pair_sim={avg_sim:.4f}")
+
+            index_masks = torch.stack(all_masks, dim=0)  # (B, N)
+
+            if enable_debug:
+                print(f"[SVDVLMS1] {N}→{tokens_per_patch} tokens/patch | alpha_val={alpha_val}")
+                print(f"[SVDVLMS1] stage1_keep: {stage1_keep}")
+                
+        
+        #----------------------------------------------------------------------------------------------
+        #相比于原来的方法，添加了除以均值的操作
+        elif self.pruning_method == 'prefixvlm':
+            # PrefixVLM S1: Greedy selection with (CLS-attn importance) + (diversity / low similarity)
+            import os
+            alpha_val = float(os.environ.get("ALPHA", "0.5"))
+            enable_debug = os.environ.get("ENABLE_DEBUG", "0") == "1"
+
+            # keep half tokens
+            # Now:target=128->STAGE1_KEEP=288
+            # Now:target=64->STAGE1_KEEP=288
+            # Now:target=32->STAGE1_KEEP=152 32特殊，需要在.sh中设置STAGE1_KEEP=152
+            stage1_keep = int(os.environ.get("STAGE1_KEEP", "288"))
+            tokens_per_patch = stage1_keep // B if (B > 1 and getattr(self.config, "image_aspect_ratio", "square") == "anyres") else stage1_keep
+
+            # -------- CLS attention importance a_i --------
+            # image_attentions: expected shape (B, H, N) or (B, N)
+            if image_attentions.dim() == 3:
+                cls_attn = image_attentions.mean(dim=1)  # (B, N) mean over heads
+            elif image_attentions.dim() == 2:
+                cls_attn = image_attentions             # (B, N)
+            else:
+                raise ValueError(f"[prefixvlm] Unexpected image_attentions shape: {tuple(image_attentions.shape)}")
+            # normalize to [0,1] per-sample
+            cls_attn = (cls_attn - cls_attn.min(dim=1, keepdim=True).values) / (
+                cls_attn.max(dim=1, keepdim=True).values - cls_attn.min(dim=1, keepdim=True).values + 1e-8
+            )  # (B, N)
+
+            all_masks = []
+            for b in range(B):
+                a = cls_attn[b]  # (N,)
+
+                # -------- similarity matrix s_ij --------
+                # use image_features (or image_keys if you prefer) for diversity
+                feat = image_features[b]  # (N, C)
+                feat_norm = feat / (feat.norm(dim=-1, keepdim=True) + 1e-8)
+                vis_sim = torch.matmul(feat_norm, feat_norm.t())  # (N, N), cosine in [-1,1]
+
+                selected = []
+                available = torch.ones(N, dtype=torch.bool, device=device)
+
+                # step0: pick highest attention
+                i0 = torch.argmax(a).item()
+                selected.append(i0)
+                available[i0] = False
+
+                # maintain max similarity to selected set: m_i = max_{j in S} s_ij
+                max_sim_to_S = vis_sim[:, i0]  # (N,)
+
+                # greedy fill
+                for step in range(1, tokens_per_patch):
+                    if not available.any():
+                        break
+
+                    diversity = 1.0 - max_sim_to_S  # higher is better (less redundant)
+                    scores = (1-alpha_val) * (a/a.mean()) + alpha_val * (diversity/diversity.mean())
+
+                    scores[~available] = -float("inf")
+                    idx = torch.argmax(scores).item()
+
+                    selected.append(idx)
+                    available[idx] = False
+                    max_sim_to_S = torch.maximum(max_sim_to_S, vis_sim[:, idx])
+
+                # build mask
+                selected_t = torch.tensor(selected, device=device, dtype=torch.long)
+                selected_t = torch.sort(selected_t).values  # keep spatial/order consistency
+                mask = torch.zeros(N, dtype=torch.bool, device=device)
+                mask[selected_t] = True
+                all_masks.append(mask)
+
+                if enable_debug and b == 0:
+                    # quick stats
+                    sel_a_mean = a[selected_t].mean().item()
+                    if selected_t.numel() > 1:
+                        sub = vis_sim[selected_t][:, selected_t]
+                        off = sub[~torch.eye(selected_t.numel(), dtype=torch.bool, device=device)]
+                        avg_sim = off.mean().item()
+                    else:
+                        avg_sim = 0.0
+                    print(f"[S1] alpha_val={alpha_val} truly_keep={selected_t.numel()} | attn_mean={sel_a_mean:.4f} | avg_pair_sim={avg_sim:.4f}")
+
+            index_masks = torch.stack(all_masks, dim=0)  # (B, N)
+
+            if enable_debug:
+                print(f"[S1] {N}→{tokens_per_patch} tokens/patch | alpha_val={alpha_val}")
+                print(f"[S1] stage1_keep: {stage1_keep}")
+                
+        #----------------------------------------------------------------------------------------------
+        #相比于原来的方法，添加了除以均值的操作
+        elif self.pruning_method == 'prefixvlm_2':
+            # PrefixVLM S1: Greedy selection with (CLS-attn importance) + (diversity / low similarity)
+            import os
+            alpha_1 = float(os.environ.get("ALPHA_1", "0.5"))
+            lambda_1 = float(os.environ.get("LAMBDA_1", "0.1"))
+            coverage_method = os.environ.get("COVERAGE", "MEAN")
+            # print("S1使用的coverage方法是:",coverage_method)
+            enable_debug = os.environ.get("ENABLE_DEBUG", "0") == "1"
+
+            # keep half tokens
+            stage1_keep = int(os.environ.get("STAGE1_KEEP", "288"))
+            tokens_per_patch = stage1_keep // B if (B > 1 and getattr(self.config, "image_aspect_ratio", "square") == "anyres") else stage1_keep
+
+            # -------- CLS attention importance a_i --------
+            # image_attentions: expected shape (B, H, N) or (B, N)
+            if image_attentions.dim() == 3:
+                cls_attn = image_attentions.mean(dim=1)  # (B, N) mean over heads
+            elif image_attentions.dim() == 2:
+                cls_attn = image_attentions             # (B, N)
+            else:
+                raise ValueError(f"[PrefixVLM_2] Unexpected image_attentions shape: {tuple(image_attentions.shape)}")
+            # normalize to [0,1] per-sample
+            cls_attn = (cls_attn - cls_attn.min(dim=1, keepdim=True).values) / (
+                cls_attn.max(dim=1, keepdim=True).values - cls_attn.min(dim=1, keepdim=True).values + 1e-8
+            )  # (B, N)
+
+            all_masks = []
+            for b in range(B):
+                a = cls_attn[b]  # (N,)
+
+                # -------- similarity matrix s_ij --------
+                # use image_features (or image_keys if you prefer) for diversity
+                feat = image_features[b]  # (N, C)
+                feat_norm = feat / (feat.norm(dim=-1, keepdim=True) + 1e-8)
+                vis_sim = torch.matmul(feat_norm, feat_norm.t())  # (N, N), cosine in [-1,1]
+
+                selected = []
+                available = torch.ones(N, dtype=torch.bool, device=device)
+
+                # step0: pick highest attention
+                i0 = torch.argmax(a).item()
+                selected.append(i0)
+                available[i0] = False
+
+                # maintain max similarity to selected set: m_i = max_{j in S} s_ij
+                max_sim_to_S = vis_sim[:, i0]  # (N,)
+
+                # greedy fill
+                for step in range(1, tokens_per_patch):
+                    if not available.any():
+                        break
+
+                    diversity = 1.0 - max_sim_to_S  # higher is better (less redundant)
+                    
+                    if coverage_method == "SCOPE":
+                        # SCOPE: marginal coverage gain
+                        coverage = torch.clamp(vis_sim - max_sim_to_S.unsqueeze(0), min=0.0).sum(dim=1)
+                        coverage[~available] = 0.0
+                    else:
+                        # MEAN: avg similarity to remaining unselected tokens
+                        sim_to_avail = vis_sim[:, available].sum(dim=1)
+                        n_avail = available.sum().item()
+                        if n_avail > 1:
+                            coverage = (sim_to_avail - 1.0) / (n_avail - 1)
+                        else:
+                            coverage = torch.zeros(N, device=device)
+
+                    scores = (a/a.mean()) + \
+                        alpha_1 * (diversity/diversity.mean()) + \
+                        lambda_1 * (coverage/coverage.mean())
+
+                    scores[~available] = -float("inf")
+                    idx = torch.argmax(scores).item()
+
+                    selected.append(idx)
+                    available[idx] = False
+                    max_sim_to_S = torch.maximum(max_sim_to_S, vis_sim[:, idx])
+
+                # build mask
+                selected_t = torch.tensor(selected, device=device, dtype=torch.long)
+                selected_t = torch.sort(selected_t).values  # keep spatial/order consistency
+                mask = torch.zeros(N, dtype=torch.bool, device=device)
+                mask[selected_t] = True
+                all_masks.append(mask)
+
+                # if enable_debug and b == 0:
+                #     R = selected_t.numel()
+
+                #     # --- attention统计 ---
+                #     sel_attn = a[selected_t]
+                #     sel_a_mean = sel_attn.mean().item()
+                #     sel_a_min = sel_attn.min().item()
+                #     sel_a_max = sel_attn.max().item()
+                #     sel_a_std = sel_attn.std().item() if R > 1 else 0.0
+                #     # 未选中token的attn均值，对比选中的是否明显更高
+                #     unsel_mask = ~mask
+                #     if unsel_mask.any():
+                #         unsel_a_mean = a[unsel_mask].mean().item()
+                #     else:
+                #         unsel_a_mean = 0.0
+
+                #     # --- 选中token两两相似度 ---
+                #     if R > 1:
+                #         sub = vis_sim[selected_t][:, selected_t]
+                #         off = sub[~torch.eye(R, dtype=torch.bool, device=device)]
+                #         avg_sim = off.mean().item()
+                #         max_sim = off.max().item()
+                #         min_sim = off.min().item()
+                #     else:
+                #         avg_sim = max_sim = min_sim = 0.0
+
+                #     # --- 覆盖性: 每个未选中token被最相似的选中token覆盖的程度 ---
+                #     if unsel_mask.any() and R > 0:
+                #         cov_sim = vis_sim[selected_t][:, unsel_mask]  # (R, U)
+                #         max_cov = cov_sim.max(dim=0).values  # (U,)
+                #         avg_coverage = max_cov.mean().item()
+                #         min_coverage = max_cov.min().item()
+                #         # 覆盖度低于阈值的未选中token数量
+                #         low_cov_count = (max_cov < 0.5).sum().item()
+                #         n_unsel = unsel_mask.sum().item()
+                #     else:
+                #         avg_coverage = min_coverage = 1.0
+                #         low_cov_count = 0
+                #         n_unsel = 0
+
+                #     # --- 全局相似度矩阵统计 ---
+                #     all_off = vis_sim[~torch.eye(N, dtype=torch.bool, device=device)]
+                #     global_sim_mean = all_off.mean().item()
+
+                #     # --- CLS attn分布 ---
+                #     cls_attn_topk = torch.topk(a, min(5, N))
+                #     topk_indices = cls_attn_topk.indices.tolist()
+                #     topk_values = [f"{v:.4f}" for v in cls_attn_topk.values.tolist()]
+
+                #     print(
+                #         f"[PrefixVLM_2 S1] === Batch {b} Debug ===\n"
+                #         f"  Config: alpha_1={alpha_1}, lambda_1={lambda_1}, N={N} -> keep={R}\n"
+                #         f"  CLS Attn: sel[mean/min/max/std]=[{sel_a_mean:.4f}/{sel_a_min:.4f}/{sel_a_max:.4f}/{sel_a_std:.4f}], "
+                #         f"unsel_mean={unsel_a_mean:.4f}, top5_idx={topk_indices}, top5_val={topk_values}\n"
+                #         f"  Pair Sim (selected): mean={avg_sim:.4f}, min={min_sim:.4f}, max={max_sim:.4f}\n"
+                #         f"  Coverage: avg={avg_coverage:.4f}, min={min_coverage:.4f}, "
+                #         f"low(<0.5)={low_cov_count}/{n_unsel}\n"
+                #         f"  Global Sim: mean={global_sim_mean:.4f}"
+                #     )
+
+            index_masks = torch.stack(all_masks, dim=0)  # (B, N)
+
+            # ————————————————————————————————————————————————————————
+            # 保存 Stage1 剪枝结果，用于可视化
+            # anyres 下 index_masks 会被 flatten(0,1) 成 (B*N,) 后过滤 token
+            # 所以全局索引需要对整个 flatten mask 做 nonzero
+            self.stage1_visual_indices = index_masks.flatten().nonzero(as_tuple=False).squeeze(1).cpu()
+            self.stage1_total_tokens = index_masks.shape[0] * index_masks.shape[1]  # B * N
+            # ————————————————————————————————————————————————————————
+
+            # if enable_debug:
+            #     print(f"[PrefixVLM_2 S1] {N}→{tokens_per_patch} tokens/patch | alpha_1={alpha_1}")
+            #     print(f"[PrefixVLM_2 S1] stage1_keep: {stage1_keep}")
+                
+                
+        elif self.pruning_method == "HoloV":
+            import os
+            import math as _math
+            from llava.model.utils import HoloV
+
+            enable_debug = os.environ.get('ENABLE_DEBUG', '0') == '1'
+
+            # Heads averaged out here, matching the reference implementation's
+            # image_attentions.mean(dim=1).float() in its encode_images.
+            cls_attn = image_attentions.mean(dim=1).float()  # (B, N)
+
+            new_image_token_num = self.visual_token_num
+            # Paper's num_crop = floor(1024 / N); N=64 -> 16, which is exactly the
+            # value the reference hardcodes. NUM_CROP overrides for ablations.
+            num_patches = int(os.environ.get(
+                "NUM_CROP", max(1, _math.floor(1024 / max(1, new_image_token_num)))))
+
+            new_image_tokens, valid_mask = HoloV(
+                image_features, cls_attn, num_patches, new_image_token_num
+            )
+
+            if enable_debug:
+                print(f"[HoloV] {N} -> {new_image_token_num} tokens | num_crop={num_patches} "
+                      f"| valid={valid_mask.sum().item()}/{valid_mask.numel()}")
+
+            image_features = new_image_tokens.to(dtype=image_features.dtype)
+            # False marks zero-padding from an underfilled allocation, so those
+            # slots are not fed to the LLM as if they were real tokens.
+            index_masks = valid_mask
+
+        elif self.pruning_method == 'Idea':
+            # ==================== Idea: Token Library with Density Peak Clustering ====================
+            # Step 1: Cluster visual tokens using Density Peak Clustering (DPC)
+            # Step 2: Select representative token per cluster (highest cls_attention)
+            # Cluster info is stored for later dynamic retrieval in LLM layers
+
+            import os
+            enable_debug = os.environ.get('ENABLE_DEBUG', '0') == '1'
+
+            # --- CLS attention: average across heads (float32) ---
+            cls_attn = image_attentions.mean(dim=1).float()  # (B, N)
+
+            # Number of clusters = target visual token num
+            num_clusters = int(os.environ.get("NUM_CLUSTERS",64))
+
+            if enable_debug:
+                print(f"\n{'='*80}")
+                print(f"[Idea DPC] Input image_features: {image_features.shape}")
+                print(f"[Idea DPC] cls_attn: {cls_attn.shape}")
+                print(f"[Idea DPC] Target clusters: {num_clusters}")
+
+            # --- Density Peak Clustering (DPC) per batch ---
+            # 1. Compute pairwise cosine distance matrix (in float32 for quantile compatibility)
+            original_dtype = image_features.dtype
+            feat_f32 = image_features.float()
+            feat_norm = feat_f32 / (feat_f32.norm(dim=-1, keepdim=True) + 1e-8)  # (B, N, C)
+            sim_matrix = torch.bmm(feat_norm, feat_norm.transpose(1, 2))  # (B, N, N)
+            dist_matrix = 1.0 - sim_matrix  # cosine distance, (B, N, N)
+
+            # 2. Compute local density rho: number of neighbors within cutoff distance dc
+            # Use adaptive dc: the distance such that ~2% of pairs are within dc
+            dist_flat = dist_matrix.view(B, -1)  # (B, N*N)
+            dc = torch.quantile(dist_flat, 0.02, dim=1, keepdim=True)  # (B, 1)
+            dc = dc.unsqueeze(-1)  # (B, 1, 1) for broadcasting
+
+            # Gaussian kernel density
+            rho = torch.exp(-(dist_matrix / (dc + 1e-8)) ** 2).sum(dim=-1) - 1.0  # (B, N), subtract self
+
+            # 3. Compute delta: distance to nearest point with higher density
+            delta = torch.zeros(B, N, device=device)
+            nearest_higher = torch.zeros(B, N, dtype=torch.long, device=device)
+
+            # Sort by density descending
+            rho_sorted_idx = torch.argsort(rho, dim=1, descending=True)  # (B, N)
+
+            for b in range(B):
+                sorted_idx = rho_sorted_idx[b]  # (N,)
+                # The point with highest density
+                delta[b, sorted_idx[0]] = dist_matrix[b, sorted_idx[0]].max()
+                nearest_higher[b, sorted_idx[0]] = sorted_idx[0]
+
+                for i in range(1, N):
+                    current = sorted_idx[i]
+                    higher_points = sorted_idx[:i]  # all points with higher density
+                    dists_to_higher = dist_matrix[b, current, higher_points]
+                    min_idx = dists_to_higher.argmin()
+                    delta[b, current] = dists_to_higher[min_idx]
+                    nearest_higher[b, current] = higher_points[min_idx]
+
+            # 4. Select cluster centers (= representative tokens): top-k by gamma = cls_attn * rho * delta
+            gamma = cls_attn * rho * delta  # (B, N)
+            representative_indices = gamma.topk(num_clusters, dim=1).indices  # (B, num_clusters)
+            representative_indices = representative_indices.sort(dim=1).values  # preserve spatial order
+
+            # 5. Assign each token to nearest representative token
+            dist_to_centers = torch.gather(
+                dist_matrix, 1,
+                representative_indices.unsqueeze(-1).expand(-1, -1, N)
+            )  # (B, K, N) — dist_to_centers[b, k, j] = dist(rep_k, token_j)
+            cluster_assignments = dist_to_centers.argmin(dim=1)  # (B, N) — cluster id for each token
+
+            if enable_debug:
+                print(f"[Idea DPC] rho range: [{rho.min().item():.4f}, {rho.max().item():.4f}]")
+                print(f"[Idea DPC] delta range: [{delta.min().item():.4f}, {delta.max().item():.4f}]")
+                print(f"[Idea DPC] gamma range: [{gamma.min().item():.4f}, {gamma.max().item():.4f}]")
+                print(f"[Idea DPC] representative_indices (sample 0): {representative_indices[0].tolist()[:10]}...")
+                for k in range(min(3, num_clusters)):
+                    cmask = (cluster_assignments[0] == k)
+                    print(f"  Cluster {k}: {cmask.sum().item()} tokens, rep={representative_indices[0, k].item()}")
+
+            # --- Save all original features (before pruning) for the token library ---
+            _idea_all_features_raw = image_features.clone()  # (B, N_orig, C)
+
+            # --- Build output: representative tokens only ---
+            C = image_features.shape[-1]  # re-fetch C (may have been overwritten by other branches)
+            rep_expanded = representative_indices.unsqueeze(-1).expand(-1, -1, C)  # (B, K, C)
+            image_features = torch.gather(image_features, 1, rep_expanded)  # (B, K, C)
+
+            # Build index_masks: all True since we already selected
+            B_new, N_new, C_new = image_features.shape
+            index_masks = torch.ones(B_new, N_new, dtype=torch.bool, device=device)
+
+            # --- Store token library info for dynamic retrieval in LLM layers ---
+            self._idea_token_library = {
+                'cluster_assignments': cluster_assignments,       # (B, N_orig) cluster id per token
+                'representative_indices': representative_indices, # (B, K) rep token index per cluster
+                'all_features_raw': _idea_all_features_raw,       # (B, N_orig, C) pre-projector
+                'cls_attn': cls_attn,                             # (B, N_orig)
+                'num_clusters': num_clusters,
+            }
+
+            if enable_debug:
+                print(f"[Idea DPC] Output image_features: {image_features.shape}")
+                print(f"[Idea DPC] Token library stored with {num_clusters} clusters")
+                print(f"{'='*80}\n")
+            
 
         elif self.pruning_method == 'vscan':
             # ==================== VScan Stage 1: Complementary Global and Local Scans ====================
@@ -1830,11 +2445,80 @@ class LlavaMetaForCausalLM(ABC):
                     print(f"{'='*80}\n")
 
         # 🔥 STAR-V2/V2-Anchor/V5/VScan need mm_projector (they bypassed line 307)
-        if self.pruning_method in ['star_v2', 'star_v2_anchor', 'star_v5', 'vscan']:
-            image_features = self.get_model().mm_projector(image_features)
+        if self.pruning_method in ['star_v2', 'star_v2_anchor', 'star_v5',  'vscan']:
+            target_dtype = next(self.get_model().mm_projector.parameters()).dtype
+            image_features = self.get_model().mm_projector(image_features.to(target_dtype))
 
         # Note: For other methods, mm_projector is already applied at line 307
         return image_features, index_masks, merged_features
+
+    def _holov_anyres_encode(self, images, image_sizes):
+        """HoloV for anyres (LLaVA-NeXT), faithful to official obananas/HoloV.
+
+        Reassemble all crops into the per-sample spatial sequence FIRST (threading the
+        CLS->patch attention in parallel through the same view/permute/unpad ops), THEN
+        prune once with HoloV -- i.e. "concatenate-then-prune". Our default (per-crop,
+        index-mask) path cannot do anyres because HoloV emits a fixed [B, keep, D] tensor
+        that breaks the .view(h, w, 24, 24, -1) spatial reshape.
+        Ref: /mnt/eason/HoloV/llava/model/llava_arch.py (prepare_inputs + HoloV @ L239).
+        Returns a list of per-sample pruned feature tensors [keep, D].
+        """
+        import os, math as _math
+        from llava.model.utils import HoloV
+
+        concat_images = torch.cat([im for im in images], dim=0)
+        feats, attns, _keys, _cls = self.get_model().get_vision_tower()(concat_images, output_attentions=True)
+        attns = attns.mean(dim=1).float()                    # (B, N) heads averaged
+        feats = self.get_model().mm_projector(feats)         # (B, N, D) project like the reference
+        split_sizes = [im.shape[0] for im in images]
+        feats = torch.split(feats, split_sizes, dim=0)
+        attns = torch.split(attns, split_sizes, dim=0)
+
+        mm_patch_merge_type = getattr(self.config, "mm_patch_merge_type", "flat")
+        image_aspect_ratio = getattr(self.config, "image_aspect_ratio", "square")
+        height = width = self.get_vision_tower().num_patches_per_side
+
+        new_image_features = []
+        for image_idx, (image_feature, image_attn) in enumerate(zip(feats, attns)):
+            if image_feature.shape[0] > 1:
+                base_image_feature = image_feature[0]
+                base_image_attn = image_attn[0]
+                image_feature = image_feature[1:]
+                image_attn = image_attn[1:]
+                assert height * width == base_image_feature.shape[0]
+                if image_aspect_ratio == "anyres":
+                    num_patch_width, num_patch_height = get_anyres_image_grid_shape(
+                        image_sizes[image_idx], self.config.image_grid_pinpoints,
+                        self.get_vision_tower().config.image_size)
+                    image_feature = image_feature.view(num_patch_height, num_patch_width, height, width, -1)
+                    image_attn = image_attn.view(num_patch_height, num_patch_width, height, width)
+                else:
+                    raise NotImplementedError
+                if "unpad" in mm_patch_merge_type:
+                    image_feature = image_feature.permute(4, 0, 2, 1, 3).contiguous()
+                    image_feature = image_feature.flatten(1, 2).flatten(2, 3)
+                    image_attn = image_attn.permute(0, 2, 1, 3).contiguous().unsqueeze(0)
+                    image_attn = image_attn.flatten(1, 2).flatten(2, 3)
+                    image_feature = unpad_image(image_feature, image_sizes[image_idx])
+                    image_attn = unpad_image(image_attn, image_sizes[image_idx])
+                    # official drops image_newline in the anyres path to keep feat/attn aligned
+                    image_feature = image_feature.flatten(1, 2).transpose(0, 1)
+                    image_attn = image_attn.flatten(1, 2).squeeze(0)
+                else:
+                    image_feature = image_feature.permute(0, 2, 1, 3, 4).contiguous().flatten(0, 3)
+                    image_attn = image_attn.permute(0, 2, 1, 3).contiguous().flatten(0, 3)
+                image_feature = torch.cat((base_image_feature, image_feature), dim=0)
+                image_attn = torch.cat((base_image_attn, image_attn), dim=0)
+            else:
+                image_feature = image_feature[0]
+                image_attn = image_attn[0]
+
+            new_num = self.visual_token_num
+            num_patches = int(os.environ.get("NUM_CROP", max(1, _math.floor(1024 / max(1, new_num)))))
+            pruned, _valid = HoloV(image_feature.unsqueeze(0), image_attn.unsqueeze(0), num_patches, new_num)
+            new_image_features.append(pruned[0].to(image_feature.dtype))
+
+        return new_image_features
 
     def prepare_inputs_labels_for_multimodal(
         self, input_ids, position_ids, attention_mask, past_key_values, labels,
@@ -1847,103 +2531,109 @@ class LlavaMetaForCausalLM(ABC):
         if type(images) is list or images.ndim == 5:
             if type(images) is list:
                 images = [x.unsqueeze(0) if x.ndim == 3 else x for x in images]
-            concat_images = torch.cat([image for image in images], dim=0)
-            image_features, index_masks, merged_features = self.encode_images(concat_images, texts=texts)
-            split_sizes = [image.shape[0] for image in images]
-            image_features = torch.split(image_features, split_sizes, dim=0)
-            index_masks = torch.split(index_masks, split_sizes, dim=0)
-            if merged_features is not None:
-                merged_features = torch.split(merged_features, split_sizes, dim=0)
-            mm_patch_merge_type = getattr(self.config, 'mm_patch_merge_type', 'flat')
-            mm_patch_merge_type = mm_patch_merge_type.replace('_unpad', '')
-            image_aspect_ratio = getattr(self.config, 'image_aspect_ratio', 'square')
-            if mm_patch_merge_type == 'flat':
-                image_features = [x.flatten(0, 1) for x in image_features]
-                index_masks = [x.flatten(0, 1) for x in index_masks]
-                image_features = [x[m] for x, m in zip(image_features, index_masks)]
-                if merged_features is not None:
-                    image_features = [torch.cat((x.reshape(y.shape[0], x.shape[0] // y.shape[0], *x.shape[1:]), y), dim=1).flatten(0, 1) \
-                                      for x, y in zip(image_features, merged_features)]
-            elif mm_patch_merge_type.startswith('spatial'):
-                new_image_features = []
-                if merged_features is None:
-                    merged_features = [None] * len(image_features)
-                for image_idx, (image_feature, index_mask, merged_feature) in enumerate(zip(image_features, index_masks, merged_features)):
-                    if image_feature.shape[0] > 1:
-                        base_image_feature = image_feature[0]
-                        image_feature = image_feature[1:]
-                        base_index_mask = index_mask[0]
-                        index_mask = index_mask[1:]
-                        if merged_feature is not None:
-                            base_merged_feature = merged_feature[0]
-                            merged_feature = merged_feature[1:]
-                        height = width = self.get_vision_tower().num_patches_per_side
-                        assert height * width == base_image_feature.shape[0]
-                        if image_aspect_ratio == 'anyres':
-                            num_patch_width, num_patch_height = get_anyres_image_grid_shape(image_sizes[image_idx], self.config.image_grid_pinpoints, self.get_vision_tower().config.image_size)
-                            image_feature = image_feature.view(num_patch_height, num_patch_width, height, width, -1)
-                            index_mask = index_mask.view(num_patch_height, num_patch_width, height, width)
-                        else:
-                            raise NotImplementedError
-                        if 'unpad' in mm_patch_merge_type:
-                            image_feature = image_feature.permute(4, 0, 2, 1, 3).contiguous()
-                            image_feature = image_feature.flatten(1, 2).flatten(2, 3)
-                            image_feature = unpad_image(image_feature, image_sizes[image_idx])
-                            image_feature = torch.cat((
-                                image_feature,
-                                self.model.image_newline[:, None, None].expand(*image_feature.shape[:-1], 1).to(image_feature.device)
-                            ), dim=-1)
-                            image_feature = image_feature.flatten(1, 2).transpose(0, 1)
-                            index_mask = index_mask.permute(0, 2, 1, 3).contiguous().unsqueeze(0)
-                            index_mask = index_mask.flatten(1, 2).flatten(2, 3)
-                            index_mask = unpad_image(index_mask, image_sizes[image_idx])
-                            index_mask = torch.cat((
-                                index_mask,
-                                torch.ones(*index_mask.shape[:-1], 1, dtype=torch.bool).to(index_mask.device)
-                            ), dim=-1)
-                            index_mask = index_mask.flatten(1, 2).squeeze(0)
-                            image_feature = image_feature[index_mask]
-                            if merged_feature is not None:
-                                image_feature = torch.cat((
-                                    image_feature,
-                                    merged_feature.flatten(0, 1)
-                                ))
-                        else:
-                            image_feature = image_feature.permute(0, 2, 1, 3, 4).contiguous()
-                            image_feature = image_feature.flatten(0, 3)
-                            index_mask = index_mask.permute(0, 2, 1, 3).contiguous()
-                            index_mask = index_mask.flatten(0, 3)
-                            image_feature = image_feature[index_mask]
-                            if merged_feature is not None:
-                                image_feature = torch.cat((
-                                    image_feature,
-                                    merged_feature.flatten(0, 1)
-                                ))
-                        base_image_feature = base_image_feature[base_index_mask]
-                        if merged_feature is not None:
-                            base_image_feature = torch.cat((base_image_feature, base_merged_feature))
-                        image_feature = torch.cat((base_image_feature, image_feature))
-                    else:
-                        image_feature = image_feature[0]
-                        index_mask = index_mask[0]
-                        if merged_feature is not None:
-                            merged_feature = merged_feature[0]
-                        if 'unpad' in mm_patch_merge_type:
-                            image_feature = torch.cat((
-                                image_feature,
-                                self.model.image_newline[None].to(image_feature.device)
-                            ), dim=0)
-                            index_mask = torch.cat((
-                                index_mask,
-                                torch.ones(1, dtype=torch.bool).to(index_mask.device)
-                            ), dim=0)
-                        image_feature = image_feature[index_mask]
-                        if merged_feature is not None:
-                            image_feature = torch.cat((image_feature, merged_feature))
-                    new_image_features.append(image_feature)
-                image_features = new_image_features
+            _use_holov_anyres = (self.pruning_method == "HoloV"
+                                 and getattr(self.config, "image_aspect_ratio", "square") == "anyres")
+            if _use_holov_anyres:
+                # HoloV anyres: official "reassemble-then-prune" (see _holov_anyres_encode)
+                image_features = self._holov_anyres_encode(images, image_sizes)
             else:
-                raise ValueError(f"Unexpected mm_patch_merge_type: {self.config.mm_patch_merge_type}")
+                concat_images = torch.cat([image for image in images], dim=0)
+                image_features, index_masks, merged_features = self.encode_images(concat_images, texts=texts)
+                split_sizes = [image.shape[0] for image in images]
+                image_features = torch.split(image_features, split_sizes, dim=0)
+                index_masks = torch.split(index_masks, split_sizes, dim=0)
+                if merged_features is not None:
+                    merged_features = torch.split(merged_features, split_sizes, dim=0)
+                mm_patch_merge_type = getattr(self.config, 'mm_patch_merge_type', 'flat')
+                mm_patch_merge_type = mm_patch_merge_type.replace('_unpad', '')
+                image_aspect_ratio = getattr(self.config, 'image_aspect_ratio', 'square')
+                if mm_patch_merge_type == 'flat':
+                    image_features = [x.flatten(0, 1) for x in image_features]
+                    index_masks = [x.flatten(0, 1) for x in index_masks]
+                    image_features = [x[m] for x, m in zip(image_features, index_masks)]
+                    if merged_features is not None:
+                        image_features = [torch.cat((x.reshape(y.shape[0], x.shape[0] // y.shape[0], *x.shape[1:]), y), dim=1).flatten(0, 1) \
+                                          for x, y in zip(image_features, merged_features)]
+                elif mm_patch_merge_type.startswith('spatial'):
+                    new_image_features = []
+                    if merged_features is None:
+                        merged_features = [None] * len(image_features)
+                    for image_idx, (image_feature, index_mask, merged_feature) in enumerate(zip(image_features, index_masks, merged_features)):
+                        if image_feature.shape[0] > 1:
+                            base_image_feature = image_feature[0]
+                            image_feature = image_feature[1:]
+                            base_index_mask = index_mask[0]
+                            index_mask = index_mask[1:]
+                            if merged_feature is not None:
+                                base_merged_feature = merged_feature[0]
+                                merged_feature = merged_feature[1:]
+                            height = width = self.get_vision_tower().num_patches_per_side
+                            assert height * width == base_image_feature.shape[0]
+                            if image_aspect_ratio == 'anyres':
+                                num_patch_width, num_patch_height = get_anyres_image_grid_shape(image_sizes[image_idx], self.config.image_grid_pinpoints, self.get_vision_tower().config.image_size)
+                                image_feature = image_feature.view(num_patch_height, num_patch_width, height, width, -1)
+                                index_mask = index_mask.view(num_patch_height, num_patch_width, height, width)
+                            else:
+                                raise NotImplementedError
+                            if 'unpad' in mm_patch_merge_type:
+                                image_feature = image_feature.permute(4, 0, 2, 1, 3).contiguous()
+                                image_feature = image_feature.flatten(1, 2).flatten(2, 3)
+                                image_feature = unpad_image(image_feature, image_sizes[image_idx])
+                                image_feature = torch.cat((
+                                    image_feature,
+                                    self.model.image_newline[:, None, None].expand(*image_feature.shape[:-1], 1).to(image_feature.device)
+                                ), dim=-1)
+                                image_feature = image_feature.flatten(1, 2).transpose(0, 1)
+                                index_mask = index_mask.permute(0, 2, 1, 3).contiguous().unsqueeze(0)
+                                index_mask = index_mask.flatten(1, 2).flatten(2, 3)
+                                index_mask = unpad_image(index_mask, image_sizes[image_idx])
+                                index_mask = torch.cat((
+                                    index_mask,
+                                    torch.ones(*index_mask.shape[:-1], 1, dtype=torch.bool).to(index_mask.device)
+                                ), dim=-1)
+                                index_mask = index_mask.flatten(1, 2).squeeze(0)
+                                image_feature = image_feature[index_mask]
+                                if merged_feature is not None:
+                                    image_feature = torch.cat((
+                                        image_feature,
+                                        merged_feature.flatten(0, 1)
+                                    ))
+                            else:
+                                image_feature = image_feature.permute(0, 2, 1, 3, 4).contiguous()
+                                image_feature = image_feature.flatten(0, 3)
+                                index_mask = index_mask.permute(0, 2, 1, 3).contiguous()
+                                index_mask = index_mask.flatten(0, 3)
+                                image_feature = image_feature[index_mask]
+                                if merged_feature is not None:
+                                    image_feature = torch.cat((
+                                        image_feature,
+                                        merged_feature.flatten(0, 1)
+                                    ))
+                            base_image_feature = base_image_feature[base_index_mask]
+                            if merged_feature is not None:
+                                base_image_feature = torch.cat((base_image_feature, base_merged_feature))
+                            image_feature = torch.cat((base_image_feature, image_feature))
+                        else:
+                            image_feature = image_feature[0]
+                            index_mask = index_mask[0]
+                            if merged_feature is not None:
+                                merged_feature = merged_feature[0]
+                            if 'unpad' in mm_patch_merge_type:
+                                image_feature = torch.cat((
+                                    image_feature,
+                                    self.model.image_newline[None].to(image_feature.device)
+                                ), dim=0)
+                                index_mask = torch.cat((
+                                    index_mask,
+                                    torch.ones(1, dtype=torch.bool).to(index_mask.device)
+                                ), dim=0)
+                            image_feature = image_feature[index_mask]
+                            if merged_feature is not None:
+                                image_feature = torch.cat((image_feature, merged_feature))
+                        new_image_features.append(image_feature)
+                    image_features = new_image_features
+                else:
+                    raise ValueError(f"Unexpected mm_patch_merge_type: {self.config.mm_patch_merge_type}")
         else:
             image_features, index_masks, merged_features = self.encode_images(images, texts=texts)
             image_features = image_features[index_masks].unsqueeze(0)

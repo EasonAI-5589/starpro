@@ -32,10 +32,20 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
     use_vscan = kwargs.pop('use_vscan', False)
     vscan_config = kwargs.pop('vscan_config', {})
 
+    # Extract DUET-VLM configuration from kwargs (Stage-1 VisionZip + Stage-2 PyramidDrop)
+    use_duet = kwargs.pop('use_duet', False)
+    duet_config = kwargs.pop('duet_config', {})
+
     kwargs = {"device_map": device_map, **kwargs}
 
     if device != "cuda":
         kwargs['device_map'] = {"": device}
+    elif device_map == "auto" and torch.cuda.device_count() == 1:
+        # 单卡可见时（各 eval 脚本按 chunk 用 CUDA_VISIBLE_DEVICES 分卡）不能用 "auto"：
+        # accelerate 会按加载瞬间的空闲显存决定是否 offload，邻居进程占用一高就把权重留在
+        # meta 上，取值时报 "Cannot copy out of meta tensor"。模型远小于单卡显存，直接钉死。
+        kwargs['device_map'] = {"": 0}
+        device_map = {"": 0}
 
     if load_8bit:
         kwargs['load_in_8bit'] = True
@@ -190,6 +200,32 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
                     print(f"  Stage 1 tokens: {vscan_config['stage1_tokens']}")
                     print(f"  Stage 2 tokens: {vscan_config['stage2_tokens']}")
                     print(f"  Prune layer: {vscan_config['prune_layer']}")
+                # 🔬 DUET-VLM (AMD-AGI, CVPR2026): Stage-2 class = PyramidDrop; Stage-1
+                # VisionZip is applied post-load below. Reference: DUET-VLM/llava/model/builder.py
+                elif use_duet:
+                    print("Loading DUET-VLM LLaVA model (VisionZip + PyramidDrop)...")
+                    from transformers import AutoConfig
+                    duet_cfg = AutoConfig.from_pretrained(model_path)
+                    # Fix transformers 4.37+ compatibility (old LLaVA ckpts lack these)
+                    if not hasattr(duet_cfg, 'attention_dropout'):
+                        duet_cfg.attention_dropout = 0.0
+                    if not hasattr(duet_cfg, 'rope_theta'):
+                        duet_cfg.rope_theta = 10000.0
+                    if not hasattr(duet_cfg, 'rope_scaling'):
+                        duet_cfg.rope_scaling = None
+                    if not hasattr(duet_cfg, 'attention_bias'):
+                        duet_cfg.attention_bias = False
+                    duet_cfg._attn_implementation = 'sdpa'
+                    # DUET config knob (checkpoints don't carry it, so inject here)
+                    duet_cfg.use_salient_tokens = duet_config.get('use_salient_tokens', False)
+                    model = LlavaLlamaForCausalLM_Duet.from_pretrained(
+                        model_path,
+                        low_cpu_mem_usage=True,
+                        config=duet_cfg,
+                        **kwargs
+                    )
+                    # Store DUET config; VisionZip + schedule applied after vision tower load
+                    model.duet_config = duet_config
                 else:
                     model = LlavaLlamaForCausalLM.from_pretrained(model_path, low_cpu_mem_usage=True, **kwargs)
     else:
@@ -231,7 +267,9 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
         if use_text_tower:
             vision_tower.load_text_tower(device_map=device_map)
         if device_map != 'auto':
-            vision_tower.to(device=device_map, dtype=torch.float16)
+            # device_map 可能是 {"": 0} 这样的 dict，.to() 只接受具体设备
+            target_device = device_map[""] if isinstance(device_map, dict) else device_map
+            vision_tower.to(device=target_device, dtype=torch.float16)
         image_processor = vision_tower.image_processor
 
     # 🔬 VScan: Additional runtime configuration (if model was loaded with VScan)
@@ -241,7 +279,26 @@ def load_pretrained_model(model_path, model_base, model_name, load_8bit=False, l
         model.model.layer_list = [vscan_config['prune_layer']]
         model.model.image_token_list = [vscan_config['stage1_tokens'], vscan_config['stage2_tokens']]
         model.model.visual_token_length = vscan_config['stage1_tokens']
-        model.model.visual_token_num = vscan_config['stage1_tokens']
+        # Use AVERAGE visual tokens for display: (stage1 + stage2) / 2
+        model.model.visual_token_num = (vscan_config['stage1_tokens'] + vscan_config['stage2_tokens']) // 2
+
+    # 🔬 DUET: Stage-1 VisionZip must be applied AFTER the CLIP tower is loaded
+    # (visionzip() dereferences model.model.vision_tower.vision_tower), then set the
+    # Stage-2 PyramidDrop layer schedule. Reference: DUET-VLM/llava/eval/model_vqa_loader.py
+    if use_duet and hasattr(model, 'duet_config'):
+        from visionzip import visionzip
+        dominant = duet_config.get('dominant', 300)
+        contextual = duet_config.get('contextual', 7)
+        cluster_width = duet_config.get('cluster_width', 4)
+        model = visionzip(model, dominant=dominant, contextual=contextual, cluster_width=cluster_width)
+        model.model.layer_list = list(duet_config.get('layer_list', [16, 24]))
+        ratios = list(duet_config.get('image_token_ratio_list', [0.5, 0.0]))
+        ratios.insert(0, 1.0)
+        model.model.image_token_ratio_list = ratios
+        # Average-over-layers visual-token budget label (display only)
+        model.model.visual_token_num = duet_config.get('visual_token_num', None)
+        print(f"  VisionZip: dominant={dominant} contextual={contextual} cluster_width={cluster_width}")
+        print(f"  PyramidDrop: layer_list={model.model.layer_list} image_token_ratio_list={model.model.image_token_ratio_list}")
 
     if hasattr(model.config, "max_sequence_length"):
         context_len = model.config.max_sequence_length

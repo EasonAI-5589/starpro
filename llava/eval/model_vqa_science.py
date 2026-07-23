@@ -36,8 +36,49 @@ def eval_model(args):
     fastv_config = {"K": 2, "T": args.visual_token_num}
     use_sparsevlm = True if args.pruning_method == "sparsevlm" else False
     sparsevlm_config = {"T": args.visual_token_num}
+    use_d2p = True if args.pruning_method == "d2p" else False
+    d2p_config = {"T": args.visual_token_num}
+    use_svdvlm = True if args.pruning_method == "svdvlm" else False
+    svdvlm_config = {"T": args.visual_token_num}
+    use_prefixvlm = True if args.pruning_method == "prefixvlm" else False
+    prefixvlm_config = {"T": args.visual_token_num}
+    use_holov2 = True if args.pruning_method == "HoloV_2" else False
+    holov2_config = {"T": args.visual_token_num}
+    use_idea = True if args.pruning_method == "Idea" else False
+    idea_config = {"T": args.visual_token_num}
+    use_prefixvlm_2 = True if args.pruning_method == "prefixvlm_2" else False
+    prefixvlm_2_config = {"T": args.visual_token_num}
     use_pdrop = True if args.pruning_method == "pdrop" else False
     pdrop_config = {"T": args.visual_token_num}
+
+    # MustDrop Configuration
+    # IMPORTANT: MustDrop uses threshold-based pruning, NOT direct token count!
+    # Thresholds from official MustDrop scripts
+    # MustDrop Configuration (aligned with model_vqa_loader.py)
+    MUSTDROP_THRESHOLDS = {
+        64:  {"global_thr": 0.011,  "individual_thr": 0.01},
+        128: {"global_thr": 0.0012, "individual_thr": 0.001},
+        192: {"global_thr": 0.001,  "individual_thr": 0.001},
+    }
+    use_mustdrop = True if args.pruning_method == "mustdrop" else False
+    thr_config = MUSTDROP_THRESHOLDS.get(args.visual_token_num, MUSTDROP_THRESHOLDS[128])
+    mustdrop_config = {
+        "pruning_layers": [2, 6, 10, 14],       # ✅ Added
+        "global_thr": thr_config["global_thr"],
+        "individual_thr": thr_config["individual_thr"],
+        "keep_rate": 0.08,                      # ✅ Added
+        "merge_threshold": 0.8,                 # ✅ Added
+        "merge_window_size": (3, 3),            # ✅ Added
+        "T": args.visual_token_num,
+    }
+
+    # VScan Configuration
+    use_vscan = True if args.pruning_method == "vscan" else False
+    vscan_config = {
+        "stage1_tokens": args.visual_token_num,
+        "stage2_tokens": args.vscan_stage2_tokens,
+        "prune_layer": args.vscan_prune_layer,
+    }
 
     # STAR Configuration
     use_star = True if args.pruning_method in ["star", "star_v2", "star_pro"] else False
@@ -49,15 +90,23 @@ def eval_model(args):
         "debug": True,
     }
 
-    use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method or args.pruning_method == "star_pro" else False
+    use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method or args.pruning_method == "star_pro" or args.pruning_method == "prefixvlm" else False
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
         visual_token_num=args.visual_token_num,
         use_fastv=use_fastv, fastv_config=fastv_config,
         use_sparsevlm=use_sparsevlm, sparsevlm_config=sparsevlm_config,
+        use_d2p=use_d2p, d2p_config=d2p_config,
+        use_svdvlm=use_svdvlm, svdvlm_config=svdvlm_config,
+        use_prefixvlm=use_prefixvlm, prefixvlm_config=prefixvlm_config,
+        use_holov2=use_holov2, holov2_config=holov2_config,
+        use_idea=use_idea, idea_config=idea_config,
+        use_prefixvlm_2=use_prefixvlm_2, prefixvlm_2_config=prefixvlm_2_config,
         use_pdrop=use_pdrop, pdrop_config=pdrop_config,
+        use_mustdrop=use_mustdrop, mustdrop_config=mustdrop_config,
         use_star=use_star, star_config=star_config,
+        use_vscan=use_vscan, vscan_config=vscan_config,
         use_text_tower=use_text_tower,
     )
 
@@ -107,18 +156,33 @@ def eval_model(args):
         input_ids = tokenizer_image_token(prompt, tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
 
         with torch.inference_mode():
-            output_ids, visual_token_num = model.generate(
-                input_ids,
-                images=images,
-                image_sizes=image_sizes,
-                texts=question,
-                do_sample=True if args.temperature > 0 else False,
-                temperature=args.temperature,
-                max_new_tokens=1024,
-                use_cache=True,
-            )
-            if hasattr(model.model, 'visual_token_num'):
-                visual_token_num = model.model.visual_token_num
+            # MustDrop has different generate() signature
+            if use_mustdrop:
+                output_ids = model.generate(
+                    mustdrop_config["global_thr"],
+                    mustdrop_config["individual_thr"],
+                    input_ids,
+                    images=images,
+                    image_sizes=image_sizes,
+                    do_sample=True if args.temperature > 0 else False,
+                    temperature=args.temperature,
+                    max_new_tokens=1024,
+                    use_cache=True,
+                )
+                visual_token_num = getattr(model.model, 'visual_token_num', 576)
+            else:
+                output_ids, visual_token_num = model.generate(
+                    input_ids,
+                    images=images,
+                    image_sizes=image_sizes,
+                    texts=question,
+                    do_sample=True if args.temperature > 0 else False,
+                    temperature=args.temperature,
+                    max_new_tokens=1024,
+                    use_cache=True,
+                )
+                if hasattr(model.model, 'visual_token_num'):
+                    visual_token_num = model.model.visual_token_num
             data_bar.set_postfix(vtn=f"{visual_token_num}")
 
         outputs = tokenizer.batch_decode(output_ids, skip_special_tokens=True)[0].strip()
@@ -148,6 +212,10 @@ if __name__ == "__main__":
     parser.add_argument("--single-pred-prompt", action="store_true")
     parser.add_argument("--pruning_method", type=str, default=None)
     parser.add_argument("--visual_token_num", type=int, default=576)
+    parser.add_argument("--vscan_stage2_tokens", type=int, default=32,
+                        help="VScan Stage 2 tokens (default: 32)")
+    parser.add_argument("--vscan_prune_layer", type=int, default=16,
+                        help="VScan prune layer (default: 16 for 7B)")
     args = parser.parse_args()
 
     eval_model(args)

@@ -15,6 +15,12 @@ from transformers.generation.utils import GenerateOutput
 
 from .modeling_llama_fastv import FastVLlamaModel
 from .modeling_llama_sparsevlm import SparseLlamaModel
+from .modeling_llama_divdriven import D2PLlamaModel
+from .modeling_llama_svd import SVDLlamaModel
+from .modeling_llama_prefix import PrefixLlamaModel
+from .modeling_llama_holov2 import HoloV_2_LlamaModel
+from .modeling_llama_idea import IdeaLlamaModel
+from .modeling_llama_prefix_2 import Prefix_2_LlamaModel
 from .modeling_llama_pdrop import PDropLlamaModel
 from .modelling_llama_star import STARVLMModel  # ⭐ 从 modelling_llama_star 导入
 from .modelling_llama_mustdrop import MustDropLlamaModel  # MustDrop baseline
@@ -45,8 +51,61 @@ class SparseLlavaLlamaModel(LlavaMetaModel, SparseLlamaModel):
     
     def __init__(self, config: LlamaConfig, sparsevlm_config: dict):
         super(SparseLlavaLlamaModel, self).__init__(config, sparsevlm_config=sparsevlm_config)
+        
+#----------------------------------------------------------------------------------------------
+#D2P: Diversity Driven Pruning Algorithm
+class D2PLlavaLlamaModel(LlavaMetaModel, D2PLlamaModel):
+    config_class = LlavaLlamaConfig
+    
+    def __init__(self, config: LlamaConfig, d2p_config: dict):
+        super(D2PLlavaLlamaModel, self).__init__(config, d2p_config=d2p_config)
+#----------------------------------------------------------------------------------------------
+
+#----------------------------------------------------------------------------------------------
+#SVDVLM: SVD-based Visual Language Model
+class SVDLlavaLlamaModel(LlavaMetaModel, SVDLlamaModel):
+    config_class = LlavaLlamaConfig
+    
+    def __init__(self, config: LlamaConfig, svdvlm_config: dict):
+        super(SVDLlavaLlamaModel, self).__init__(config, svdvlm_config=svdvlm_config)
+#----------------------------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------
+# PrefixVLM: Prefix-based Visual Language Model
+class PrefixLlavaLlamaModel(LlavaMetaModel, PrefixLlamaModel):
+    config_class = LlavaLlamaConfig
+    
+    def __init__(self, config: LlamaConfig, prefixvlm_config: dict):
+        super(PrefixLlavaLlamaModel, self).__init__(config, prefixvlm_config=prefixvlm_config)
+# -------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------
+# HoloV_2: HoloV_2 baseline
+class HoloV_2_LlavaLlamaModel(LlavaMetaModel, HoloV_2_LlamaModel):
+    config_class = LlavaLlamaConfig
+    
+    def __init__(self, config: LlamaConfig, holov2_config: dict):
+        super(HoloV_2_LlavaLlamaModel, self).__init__(config, holov2_config=holov2_config)
+# -------------------------------------------------------------------------
+
+# -------------------------------------------------------------------------
+# Idea: Idea baseline
+class Idea_LlavaLlamaModel(LlavaMetaModel, IdeaLlamaModel):
+    config_class = LlavaLlamaConfig
+    
+    def __init__(self, config: LlamaConfig, idea_config: dict):
+        super(Idea_LlavaLlamaModel, self).__init__(config, idea_config=idea_config)
+# -------------------------------------------------------------------------
 
 
+# -------------------------------------------------------------------------
+# Prefix_2: Prefix-2 baseline
+class Prefix_2_LlavaLlamaModel(LlavaMetaModel, Prefix_2_LlamaModel):
+    config_class = LlavaLlamaConfig
+    
+    def __init__(self, config: LlamaConfig, prefixvlm_2_config: dict):
+        super(Prefix_2_LlavaLlamaModel, self).__init__(config, prefixvlm_2_config=prefixvlm_2_config)
+# -------------------------------------------------------------------------
 class PDropLlavaLlamaModel(LlavaMetaModel, PDropLlamaModel):
     config_class = LlavaLlamaConfig
     
@@ -106,6 +165,12 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     def __init__(self, config, pruning_method=None, visual_token_num=None,
                  use_fastv=False, fastv_config=None,
                  use_sparsevlm=False, sparsevlm_config=None,
+                 use_svdvlm=False, svdvlm_config=None,
+                 use_prefixvlm=False, prefixvlm_config=None,
+                 use_d2p=False, d2p_config=None,
+                 use_holov2=False, holov2_config=None,
+                 use_idea=False, idea_config=None,
+                 use_prefixvlm_2=False, prefixvlm_2_config=None,
                  use_pdrop=False, pdrop_config=None,
                  use_star=False, star_config=None,  # ⭐ 参数名: use_star, star_config
                  use_mustdrop=False, mustdrop_config=None,  # MustDrop baseline
@@ -131,6 +196,24 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         elif use_sparsevlm:
             print(f"Use SparseVLM: {sparsevlm_config}")
             self.model = SparseLlavaLlamaModel(config, sparsevlm_config=sparsevlm_config)
+        elif use_d2p:
+            print(f"Use D2P: {d2p_config}")
+            self.model = D2PLlavaLlamaModel(config, d2p_config=d2p_config)
+        elif use_svdvlm:
+            print(f"Use SVDVLM: {svdvlm_config}")
+            self.model = SVDLlavaLlamaModel(config, svdvlm_config=svdvlm_config)
+        elif use_prefixvlm:
+            print(f"Use PrefixVLM: {prefixvlm_config}")
+            self.model = PrefixLlavaLlamaModel(config, prefixvlm_config=prefixvlm_config)
+        elif use_holov2:
+            print(f"Use HoloV_2: {holov2_config}")
+            self.model = HoloV_2_LlavaLlamaModel(config, holov2_config=holov2_config)
+        elif use_idea:
+            print(f"Use Idea: {idea_config}")
+            self.model = Idea_LlavaLlamaModel(config, idea_config=idea_config)
+        elif use_prefixvlm_2:
+            print(f"Use PrefixVLM_2: {prefixvlm_2_config}")
+            self.model = Prefix_2_LlavaLlamaModel(config, prefixvlm_2_config=prefixvlm_2_config)
         elif use_pdrop:
             print(f"Use PDrop: {pdrop_config}")
             self.model = PDropLlavaLlamaModel(config, pdrop_config=pdrop_config)
@@ -289,8 +372,12 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         if self.start_latency:
             if self.phase == "prefill" and input_ids is None:
                 self.start_event.record()
-            elif self.phase == "decode" and input_ids.shape[1] == 1:
+            elif self.phase == "decode" and input_ids is not None and input_ids.shape[1] == 1:
                 self.start_event.record()
+
+        # Pass token library to inner model for dynamic cluster expand/collapse (idea method)
+        if hasattr(self, '_idea_token_library'):
+            self.model._idea_token_library = self._idea_token_library
 
         output = super().forward(
             input_ids=input_ids,
@@ -311,11 +398,17 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 torch.cuda.synchronize()
                 self.prefill_latency += self.start_event.elapsed_time(self.end_event)
                 self.phase = "decode"
-            elif self.phase == "decode" and input_ids.shape[1] == 1:
+            elif self.phase == "decode" and input_ids is not None and input_ids.shape[1] == 1:
                 self.end_event.record()
                 torch.cuda.synchronize()
                 self.decode_latency += self.start_event.elapsed_time(self.end_event)
                 self.phase = "prefill"
+
+        # Clean up dynamic cluster state after forward (idea method)
+        if hasattr(self.model, '_idea_expanded_clusters'):
+            del self.model._idea_expanded_clusters
+        if hasattr(self.model, '_idea_current_token_cluster_ids'):
+            del self.model._idea_current_token_cluster_ids
 
         return output
 

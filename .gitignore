@@ -1,37 +1,79 @@
-# Python
-__pycache__
-*.pyc
-*.egg-info
-dist
+# ===== LLaVA-STAR-Pro2 repo .gitignore (code-only push) =====
+# caches / bytecode
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.cache/
+**/.cache/
+.DS_Store
 
-# Log
+# model weights / large binaries (never in repo)
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.gguf
+*.onnx
+*.h5
+*.pkl
+*.npy
+*.npz
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.mp4
+*.avi
+*.mov
+
+# data / eval artifacts / outputs
+data/
+playground/data/
+**/answers/
+results/
+outputs/
+output/
+logs/
 *.log
-*.log.*
-*.json
+wandb/
+runs/
+eval_results/
+checkpoints/
+ckpt*/
 *.jsonl
 
-# Data
-!**/alpaca-data-conversation.json
+# our safety backups / scratch
+*.pre_*
+*.bak
+*.bak_*
+_duet_*.py
 
-# Editor
-.idea
-*.swp
+# env
+.env
+*.pem
+*.key
+id_rsa*
 
-# Other
-.DS_Store
-wandb
-output
+# experiment output dirs / logs (broader)
+results*/
+experiments*/
+logs*/
+*.fulllog
+*.output
+*.out
+merge.jsonl
+aihc_jobspecs/
 
-checkpoints
-ckpts*
-
-.ipynb_checkpoints
-*.ipynb
-
-# DevContainer
-!.devcontainer/*
-
-# Demo
-serve_images/
-visualization_outputs/
-0
+# visualization / paper artifacts (not code)
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*_vis/
+*visualization*/
+zzz_*/
+ablations_*/
+vis_samples*.json

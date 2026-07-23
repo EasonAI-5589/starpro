@@ -98,6 +98,12 @@ class MustDropLlavaLlamaForCausalLM(LlamaDynamicvitForCausalLM, LlavaMetaForCaus
         self.prefill_latency = 0.0
         self.decode_latency = 0.0
 
+        # FLOPS tracking (for compatibility with eval metrics)
+        self.track_flops = False
+        self.layer_visual_tokens = []
+        self.total_flops = 0.0
+        self.flops_count = 0
+
         # Initialize weights and apply final processing
         self.post_init()
 

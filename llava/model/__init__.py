@@ -14,3 +14,10 @@ from .language_model.llava_llama_vscan import (
     LlavaLlamaForCausalLM_VScan,
     VScanLlavaConfig,
 )
+
+# DUET-VLM integration (VisionZip stage-1 + PyramidDrop stage-2)
+from .language_model.llava_llama_duet import (
+    LlavaLlamaForCausalLM_Duet,
+    DuetBaseLlavaLlamaForCausalLM,
+    DuetLlavaConfig,
+)

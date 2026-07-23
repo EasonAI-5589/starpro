@@ -2,8 +2,34 @@ import torch
 from typing import Dict, List, Optional, Tuple, Union
 from transformers.models.llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaModel, Cache, DynamicCache, \
-    _prepare_4d_causal_attention_mask, _prepare_4d_causal_attention_mask_for_sdpa
+    _prepare_4d_causal_attention_mask, _prepare_4d_causal_attention_mask_for_sdpa, \
+    LlamaRotaryEmbedding, LlamaLinearScalingRotaryEmbedding, LlamaDynamicNTKScalingRotaryEmbedding
 from transformers.modeling_outputs import BaseModelOutputWithPast
+
+
+# Fix: Patch LlamaRotaryEmbedding to return the FULL cos/sin cached table
+# instead of slicing to [:seq_len]. After visual token pruning, different
+# layers have different KV cache lengths, so seq_len varies per layer.
+# But position_ids may reference positions beyond the shortest layer's
+# seq_len. Returning the full table (up to max_seq_len_cached) ensures
+# any valid position_id can be indexed safely.
+_orig_rotary_forward = LlamaRotaryEmbedding.forward
+
+def _patched_rotary_forward(self, x, seq_len=None):
+    if seq_len > self.max_seq_len_cached:
+        self._set_cos_sin_cache(seq_len=seq_len, device=x.device, dtype=x.dtype)
+    # Return full cached table instead of [:seq_len] slice
+    return (
+        self.cos_cached[:self.max_seq_len_cached].to(dtype=x.dtype),
+        self.sin_cached[:self.max_seq_len_cached].to(dtype=x.dtype),
+    )
+
+LlamaRotaryEmbedding.forward = _patched_rotary_forward
+# Also patch subclasses
+if hasattr(LlamaLinearScalingRotaryEmbedding, 'forward'):
+    LlamaLinearScalingRotaryEmbedding.forward = _patched_rotary_forward
+if hasattr(LlamaDynamicNTKScalingRotaryEmbedding, 'forward'):
+    LlamaDynamicNTKScalingRotaryEmbedding.forward = _patched_rotary_forward
 
 
 # STAR-FastV Multi-layer pruning schedule
@@ -211,7 +237,9 @@ class STARVLMModel(LlamaModel):
         if self.mode == "star_pro":
             # STAR-PRO: Two-stage mode with adaptive schedule (Stage 1 gives target*2)
             # Note: User should pass T=128 for pad, T=640 for anyres (manually adjusted)
-            self.visual_token_length = self.target_visual_tokens * 2
+            import os as _os
+            _stage1_mult = float(_os.environ.get("STAGE1_MULT", "2"))
+            self.visual_token_length = int(self.target_visual_tokens * _stage1_mult)
 
             # Stage 2 Pruning Schedule Ablation Support
             # Priority: custom schedule > environment variable > default
@@ -301,6 +329,10 @@ class STARVLMModel(LlamaModel):
         self.prefill_done = False
         self.visual_token_num = 0
         self.layer_visual_tokens = []  # Track visual tokens per layer for FLOPS calculation
+        # STAR_KEEP_POSIDS lifecycle: original pre-pruning prefill length and
+        # decode-step counter. Reset for every new generate() call.
+        self.orig_seq_len = None
+        self.decode_step = 0
 
     def forward(
         self,
@@ -318,6 +350,8 @@ class STARVLMModel(LlamaModel):
         # Read debug flag from environment
         import os
         enable_debug = os.environ.get('ENABLE_DEBUG', '0') == '1'
+        star_causal_fix = os.environ.get('STAR_CAUSAL_FIX', '0') == '1'
+        star_keep_posids = os.environ.get('STAR_KEEP_POSIDS', '0') == '1'
 
         # ============ DEBUG: 追踪序列长度来源 ============
         if enable_debug and past_key_values is None:  # 只在 prefill 阶段打印
@@ -407,6 +441,31 @@ class STARVLMModel(LlamaModel):
             )
             position_ids = position_ids.unsqueeze(0)
 
+        # Keep decode positions continuing from the original, unpruned prefill
+        # length. This is the decode-side half of the historical
+        # STAR_KEEP_POSIDS fix.
+        if (
+            star_keep_posids
+            and seq_length == 1
+            and self.prefill_done
+            and getattr(self, 'orig_seq_len', None) is not None
+            and batch_size == 1
+        ):
+            expected_pos = self.orig_seq_len + self.decode_step
+            if int(position_ids[0, -1].item()) != expected_pos:
+                if enable_debug:
+                    print(
+                        "[STAR_KEEP_POSIDS] decode override: incoming position "
+                        f"{int(position_ids[0, -1].item())} -> {expected_pos}"
+                    )
+                position_ids = torch.full(
+                    (batch_size, 1),
+                    expected_pos,
+                    dtype=position_ids.dtype,
+                    device=position_ids.device,
+                )
+            self.decode_step += 1
+
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
 
@@ -439,7 +498,14 @@ class STARVLMModel(LlamaModel):
 
             self.current_visual_length = actual_visual_length
             self.visual_token_indices = torch.arange(actual_visual_length, device=hidden_states.device)
+            self.orig_seq_len = seq_length
+            self.decode_step = 0
             self.prefill_done = True
+            if star_keep_posids and enable_debug:
+                print(
+                    f"[STAR_KEEP_POSIDS] prefill: orig_seq_len={self.orig_seq_len}, "
+                    "decode_step reset to 0"
+                )
 
             if self.mode == "star_pro":
                 mode_name = "STAR-PRO Stage 2"
@@ -505,12 +571,32 @@ class STARVLMModel(LlamaModel):
                     if enable_debug:
                         print(f"\n[{mode_name}] Layer {layer_idx}: Pruning {self.current_visual_length} → {target_visual_length}")
 
-                    # Forward pass to get attention scores
+                    # Forward pass to get attention scores. With SDPA, an
+                    # all-valid prefill mask is normally represented as None
+                    # and causality is supplied through SDPA's is_causal
+                    # fast-path. Requesting attentions makes the pruning layer
+                    # fall back to eager attention, where a None mask would be
+                    # bidirectional. Rebuild the explicit causal mask for the
+                    # canonical STAR-Pro evaluation configuration.
+                    pruning_attention_mask = attention_mask
+                    if star_causal_fix and attention_mask is None:
+                        pruning_attention_mask = _prepare_4d_causal_attention_mask(
+                            None,
+                            (batch_size, hidden_states.shape[1]),
+                            hidden_states,
+                            past_key_values_length,
+                        )
+                        if enable_debug:
+                            print(
+                                f"[STAR-PRO CAUSAL FIX] layer={layer_idx} "
+                                f"mask_shape={tuple(pruning_attention_mask.shape)}"
+                            )
+
                     if self.gradient_checkpointing and self.training:
                         layer_outputs = self._gradient_checkpointing_func(
                             decoder_layer.__call__,
                             hidden_states,
-                            attention_mask,
+                            pruning_attention_mask,
                             position_ids,
                             past_key_values,
                             True,
@@ -519,7 +605,7 @@ class STARVLMModel(LlamaModel):
                     else:
                         layer_outputs = decoder_layer(
                             hidden_states,
-                            attention_mask=attention_mask,
+                            attention_mask=pruning_attention_mask,
                             position_ids=position_ids,
                             past_key_value=past_key_values,
                             output_attentions=True,
@@ -626,45 +712,99 @@ class STARVLMModel(LlamaModel):
                         visual_hidden = hidden_states[:, visual_start:visual_end]  # (B, N_vis, D)
                         text_hidden = hidden_states[:, visual_end:]  # (B, N_text, D)
 
-                        # Compute text-visual similarity matrix to find important text tokens
-                        # (B, N_text, D) @ (B, D, N_vis) -> (B, N_text, N_vis)
-                        text_visual_sim = torch.matmul(text_hidden, visual_hidden.transpose(1, 2))
-                        text_visual_sim = text_visual_sim.squeeze(0)  # (N_text, N_vis)
+                        if text_hidden.shape[1] == 0:
+                            # No text tokens: fallback to uniform visual attention
+                            visual_attention = torch.ones(visual_end - visual_start, device=hidden_states.device)
+                        else:
+                            # Compute text-visual similarity matrix to find important text tokens
+                            # (B, N_text, D) @ (B, D, N_vis) -> (B, N_text, N_vis)
+                            text_visual_sim = torch.matmul(text_hidden, visual_hidden.transpose(1, 2))
+                            text_visual_sim = text_visual_sim.squeeze(0)  # (N_text, N_vis)
 
-                        # Identify text tokens that attend strongly to visual tokens
-                        # Average similarity per text token
-                        text_importance = text_visual_sim.softmax(dim=0).mean(dim=1)  # (N_text,)
+                            # Identify text tokens that attend strongly to visual tokens
+                            # Average similarity per text token
+                            text_importance = text_visual_sim.softmax(dim=0).mean(dim=1)  # (N_text,)
 
-                        # Select text raters: tokens with above-average importance
-                        text_rater_mask = text_importance > text_importance.mean()
-                        text_rater_indices = torch.where(text_rater_mask)[0]
+                            # Select text raters: tokens with above-average importance
+                            text_rater_mask = text_importance > text_importance.mean()
+                            text_rater_indices = torch.where(text_rater_mask)[0]
 
-                        if len(text_rater_indices) == 0:
-                            # Fallback: use top 50% if no tokens above mean
-                            num_raters = max(1, len(text_importance) // 2)
-                            text_rater_indices = text_importance.topk(num_raters).indices
+                            if len(text_rater_indices) == 0:
+                                num_raters = max(1, len(text_importance) // 2)
+                                text_rater_indices = text_importance.topk(num_raters).indices
 
-                        if enable_debug:
-                            print(f"[{mode_name}] Using {len(text_rater_indices)} text rater tokens (out of {len(text_importance)} text tokens)")
+                            if enable_debug:
+                                print(f"[{mode_name}] Using {len(text_rater_indices)} text rater tokens (out of {len(text_importance)} text tokens)")
 
-                        # Get attention from text raters to visual region
-                        # Offset text_rater_indices to account for visual tokens
-                        text_rater_positions = text_rater_indices + visual_end
-                        # Fix: Ensure text_rater_positions is on the same device as attn_avg for accelerate compatibility
-                        text_rater_positions = text_rater_positions.to(attn_avg.device)
-                        rater_to_visual_attn = attn_avg[0, text_rater_positions, visual_start:visual_end]  # (N_raters, N_vis)
+                            # Get attention from text raters to visual region
+                            text_rater_positions = text_rater_indices + visual_end
+                            text_rater_positions = text_rater_positions.to(attn_avg.device)
+                            rater_to_visual_attn = attn_avg[0, text_rater_positions, visual_start:visual_end]
 
-                        # Aggregate: mean across text raters
-                        visual_attention = rater_to_visual_attn.mean(dim=0)  # (N_vis,)
+                            # Aggregate: mean across text raters
+                            visual_attention = rater_to_visual_attn.mean(dim=0)  # (N_vis,)
 
-                        if enable_debug:
-                            print(f"[{mode_name}] Multi-token guidance - Visual attention stats: "
-                                  f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
-                                  f"max={visual_attention.max():.4f}")
+                            if enable_debug:
+                                print(f"[{mode_name}] Multi-token guidance - Visual attention stats: "
+                                      f"mean={visual_attention.mean():.4f}, std={visual_attention.std():.4f}, "
+                                      f"max={visual_attention.max():.4f}")
 
                     # Select top-k important visual tokens (text-guided)
                     keep_indices = torch.topk(visual_attention, k=target_visual_length).indices
                     keep_indices = keep_indices.sort().values  # Sort to maintain position order
+
+                    # QR anchor preservation (STAGE2_ANCHOR_M): force-keep the top-M strongest QR
+                    # coverage anchors at EVERY pruning layer (end-to-end), filling the remaining
+                    # budget by text attention. Default M=0 => unchanged baseline. Optional overlap
+                    # diagnostic gated behind QR_OVERLAP_DIAG=1 (measures attention-only overlap).
+                    _qr = getattr(self, "_qr_pivot_rank", None)
+                    if _qr is not None:
+                        try:
+                            _alive = self.visual_token_indices
+                            _qrd = _qr.to(_alive.device)
+                            if int(_alive.numel()) > 0 and int(_alive.max()) < int(_qrd.numel()):
+                                _alive_rank = _qrd[_alive]
+                                _ki0 = keep_indices  # attention-only keep (positions into alive)
+                                _anchor_m = int(os.environ.get("STAGE2_ANCHOR_M", "0"))
+                                _anchor_m = max(0, min(_anchor_m, int(target_visual_length)))
+                                if _anchor_m > 0:
+                                    _order = torch.argsort(_alive_rank)  # ascending rank = strongest coverage first
+                                    _anchor_pos = _order[:_anchor_m]
+                                    _attn = visual_attention.clone()
+                                    _attn[_anchor_pos] = float("-inf")
+                                    _nfill = int(target_visual_length) - _anchor_m
+                                    if _nfill > 0:
+                                        _fill = torch.topk(_attn, k=_nfill).indices
+                                        _keep_pos = torch.cat([_anchor_pos.to(_fill.device), _fill])
+                                    else:
+                                        _keep_pos = _anchor_pos
+                                    keep_indices = _keep_pos.sort().values
+                                    if os.environ.get("STAGE2_ANCHOR_VERBOSE", "0") == "1":
+                                        import sys as _sysa
+                                        _kset0 = set(int(x) for x in _anchor_pos.tolist())
+                                        _kset1 = set(int(x) for x in keep_indices.tolist())
+                                        print("[STAGE2-ANCHOR] layer=" + str(layer_idx) + " M=" + str(_anchor_m) + " keep=" + str(int(keep_indices.numel())) + " anchors_in_keep=" + str(len(_kset0 & _kset1)) + "/" + str(_anchor_m), file=_sysa.stderr, flush=True)
+                                if os.environ.get("QR_OVERLAP_DIAG", "0") == "1":
+                                    _ki = _ki0.to(_alive.device)
+                                    _kept_slots = _alive[_ki]
+                                    _kept_rank = _qrd[_kept_slots]
+                                    _dm = torch.ones(int(_alive.numel()), dtype=torch.bool, device=_alive.device)
+                                    _dm[_ki] = False
+                                    _dropped_rank = _qrd[_alive[_dm]]
+                                    _kset = set(int(x) for x in _kept_slots.tolist())
+                                    _ord2 = torch.argsort(_alive_rank)
+                                    _parts = []
+                                    for _mm in (8, 16, 32):
+                                        if _mm <= int(_alive.numel()):
+                                            _top = [int(x) for x in _alive[_ord2[:_mm]].tolist()]
+                                            _surv = sum(1 for x in _top if x in _kset)
+                                            _parts.append("top" + str(_mm) + "=" + str(_surv) + "/" + str(_mm))
+                                    _mk = float(_kept_rank.float().mean()) if _kept_rank.numel() else -1.0
+                                    _md = float(_dropped_rank.float().mean()) if _dropped_rank.numel() else -1.0
+                                    import sys as _sysd
+                                    print("[QR-OVERLAP-DIAG] layer=" + str(layer_idx) + " alive=" + str(int(_alive.numel())) + " keep=" + str(int(target_visual_length)) + " " + " ".join(_parts) + " meanrank_kept=" + format(_mk, ".1f") + " meanrank_dropped=" + format(_md, ".1f"), file=_sysd.stderr, flush=True)
+                        except Exception:
+                            pass
 
                     if enable_debug:
                         print(f"[{mode_name}] Selected {len(keep_indices)} tokens using text-to-visual attention")
@@ -684,12 +824,23 @@ class STARVLMModel(LlamaModel):
                     ], dim=1)
 
                     if position_ids is not None:
-                        new_positions = position_ids[:, visual_start:visual_end][:, keep_indices]
-                        position_ids = torch.cat([
-                            position_ids[:, :visual_start],
-                            new_positions,
-                            position_ids[:, visual_end:]
-                        ], dim=1)
+                        if star_keep_posids:
+                            # Keep original text positions and subset visual
+                            # positions. This matches the recovered aaai27 LLaVA
+                            # QR setting and avoids shifting later text tokens.
+                            pos_keep = keep_indices.to(position_ids.device)
+                            new_visual_pos = position_ids[:, visual_start:visual_end][:, pos_keep]
+                            position_ids = torch.cat([
+                                position_ids[:, :visual_start],
+                                new_visual_pos,
+                                position_ids[:, visual_end:]
+                            ], dim=1)
+                        else:
+                            # Historical behavior in this base tree.
+                            new_seq_len = hidden_states.shape[1]
+                            position_ids = torch.arange(
+                                new_seq_len, dtype=position_ids.dtype, device=position_ids.device
+                            ).unsqueeze(0)
 
                     if attention_mask is not None and attention_mask.dim() == 4:
                         new_mask_visual = attention_mask[:, :, :, visual_start:visual_end][:, :, :, keep_indices]

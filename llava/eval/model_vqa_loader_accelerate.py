@@ -98,15 +98,33 @@ def eval_model(args):
     fastv_config = {"K": 2, "T": args.visual_token_num}
     use_sparsevlm = True if args.pruning_method == "sparsevlm" else False
     sparsevlm_config = {"T": args.visual_token_num}
+    use_d2p = True if args.pruning_method == "d2p" else False
+    d2p_config = {"T": args.visual_token_num}
     use_pdrop = True if args.pruning_method == "pdrop" else False
     pdrop_config = {"T": args.visual_token_num}
-    use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method else False
+    use_svdvlm = True if args.pruning_method == "svdvlm" else False
+    svdvlm_config = {"T": args.visual_token_num}
+    use_prefixvlm = True if args.pruning_method == "prefixvlm" else False
+    prefixvlm_config = {"T": args.visual_token_num}
+    use_holov2 = True if args.pruning_method == "HoloV_2" else False
+    holov2_config = {"T": args.visual_token_num}
+    use_idea = True if args.pruning_method == "Idea" else False
+    idea_config = {"T": args.visual_token_num}
+    use_prefixvlm_2 = True if args.pruning_method == "prefixvlm_2" else False
+    prefixvlm_2_config = {"T": args.visual_token_num}
+    use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or args.pruning_method == "prefixvlm" else False
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
         visual_token_num=args.visual_token_num,
         use_fastv=use_fastv, fastv_config=fastv_config,
         use_sparsevlm=use_sparsevlm, sparsevlm_config=sparsevlm_config,
+        use_d2p=use_d2p, d2p_config=d2p_config,
+        use_svdvlm=use_svdvlm, svdvlm_config=svdvlm_config,
+        use_prefixvlm=use_prefixvlm, prefixvlm_config=prefixvlm_config,
+        use_holov2=use_holov2, holov2_config=holov2_config,
+        use_idea=use_idea, idea_config=idea_config,
+        use_prefixvlm_2=use_prefixvlm_2, prefixvlm_2_config=prefixvlm_2_config,
         use_pdrop=use_pdrop, pdrop_config=pdrop_config,
         use_text_tower=use_text_tower,
     )

@@ -1,12 +1,42 @@
 #!/bin/bash
 
-gpu_list="${CUDA_VISIBLE_DEVICES:-0}"
+#d2p
+# export ENABLE_DEBUG=1
+# export DIV_1=0
+# export DIV_2=1.5
+# bash scripts/v1_5/7b/mme.sh d2p 
+
+# #prefixvlm
+# export ENABLE_DEBUG=1
+# export ALPHA=0.6 
+# export LAMBDA=0.5
+# export STAGE1_KEEP=64 #--32
+# export STAGE1_KEEP=128 #--64
+# export STAGE1_KEEP=256 #--128 
+
+#prefixvlm_2
+export ENABLE_DEBUG=1
+export ALPHA_1=1 #1.5对应prefix中的ALPHA=0.6
+export LAMBDA_1=0.1 #越大表示越考虑第一阶段的coverage
+export ALPHA_2=1.0 #对应prefix中的LAMBDA=0.5
+export LAMBDA_2=0.1 #越大表示越考虑第二阶段的coverage
+export STAGE1_KEEP=320 #--160
+# export STAGE1_KEEP=640 #--320
+# export STAGE1_KEEP=1280 #--640  
+
+# #svd
+# export SVD_TAU=0.95
+# export ALPHA=0.6 
+# export LAMBDA=0.48 
+
+# export NUM_CLUSTERS=64
+# export ATTN_THRESHOLD_RATIO=0.5
+gpu_list="${CUDA_VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
 IFS=',' read -ra GPULIST <<< "$gpu_list"
 
 CHUNKS=${#GPULIST[@]}
-
-CKPT_DIR="${CKPT_DIR:-/mnt/bn/bes-mllm-shared/checkpoint/LLaVA}"
-DATA_DIR="${DATA_DIR:-/mnt/bn/bes-mllm-shared/data/LLaVA/LLaVA-Eval}"
+CKPT_DIR="${CKPT_DIR:-/mnt/eason_ckp/models}"
+DATA_DIR="${DATA_DIR:-/mnt/eason_ckp/LLaVA-Eval}"
 
 CKPT="llava-v1.6-vicuna-13b"
 SPLIT="llava_vqav2_mscoco_test-dev2015"

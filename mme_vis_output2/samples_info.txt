@@ -1,0 +1,309 @@
+[celebrity_jack_shields]
+Question: Is the actor inside the red bounding box called Jack Shields? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[celebrity_tt0049730_shot_0273_img_0]
+Question: Is the person inside the red bounding box called Addie Yungmee? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[celebrity_tt0064115_shot_0367_img_0]
+Question: Is the actor inside the red bounding box named Robert Redford? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0066026_shot_0085_img_0]
+Question: Is the person inside the red bounding box called Donald Sutherland? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0067116_shot_0122_img_0]
+Question: Is the actor inside the red bounding box called Gene Hackman? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0070735_shot_0818_img_0]
+Question: Is the person inside the red bounding box named Robert Redford? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0070849_shot_0021_img_1]
+Question: Is the person inside the red bounding box named Maria Schneider? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0073629_shot_0700_img_0]
+Question: Is the person inside the red bounding box named Barry Bostwick? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0074119_shot_0814_img_0]
+Question: Is the actor inside the red bounding box called Robert Redford? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0075148_shot_0618_img_0]
+Question: Is the actor inside the red bounding box called Sylvester Stallone? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0077402_shot_1220_img_0]
+Question: Is the person inside the red bounding box named Scott H. Reiniger? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0078841_shot_0692_img_0]
+Question: Is the actor inside the red bounding box named Shirley MacLaine? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0079470_shot_0798_img_0]
+Question: Is the person inside the red bounding box named Eric Idle? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0083907_shot_0633_img_0]
+Question: Is the actor inside the red bounding box named Bruce Campbell? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0089218_shot_0327_img_0]
+Question: Is the person inside the red bounding box named Sean Astin? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0093565_shot_0409_img_0]
+Question: Is the actor inside the red bounding box named Cher? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0095765_shot_0008_img_0]
+Question: Is the actor inside the red bounding box called Antonella Attili? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0096754_shot_0570_img_1]
+Question: Is the person inside the red bounding box named Todd Graff? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0096874_shot_0647_img_0]
+Question: Is the actor inside the red bounding box named Michael J. Fox? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0099685_shot_1132_img_0]
+Question: Is the actor inside the red bounding box called Chick Allan? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[celebrity_tt0103064_shot_1206_img_0]
+Question: Is the actor inside the red bounding box named Arnold Schwarzenegger? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0103064_shot_2602_img_1]
+Question: Is the person inside the red bounding box named Arnold Schwarzenegger? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0104257_shot_0477_img_0]
+Question: Is the person inside the red bounding box named Jack Nicholson? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0113101_shot_0547_img_0]
+Question: Is the person inside the red bounding box named Tim Roth? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0115798_shot_0844_img_1]
+Question: Is the person inside the red bounding box named Renee Herlocker? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[celebrity_tt0117060_shot_1401_img_0]
+Question: Is the actor inside the red bounding box called Jean Reno? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0117381_shot_0798_img_1]
+Question: Is the person inside the red bounding box called Edward Norton? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0118883_shot_0691_img_1]
+Question: Is the actor inside the red bounding box called Julia Roberts? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0118971_shot_0679_img_0]
+Question: Is the actor inside the red bounding box called Charlize Theron? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0119094_shot_0446_img_2]
+Question: Is the actor inside the red bounding box called Nicolas Cage? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[celebrity_tt0119314_shot_0572_img_0]
+Question: Is the actor inside the red bounding box called Scarlett Johansson? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[landmark_034d066523bb20d1]
+Question: Is this a photo of Atami Castle? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[landmark_0443da4f4fcdea52]
+Question: Is this an image of Port of Funchal? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[landmark_05bcf05b4460d2c3]
+Question: Is this an image of Mode Gakuen Cocoon Tower? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[landmark_05d56e249af839e7]
+Question: Is this a photo of Serbian Orthodox Cathedral in Sarajevo? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[landmark_0613d7e8f292ee15]
+Question: Is this a photo of Museo Archeologico G. Rambotti? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[landmark_06d039ff97afef04]
+Question: Is this a picture of Arch of Galerius (Thessaloniki)? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[landmark_07551cf96af77299]
+Question: Is this a photo of Friedhof Wilmersdorf? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[landmark_07ed43dd266b669b]
+Question: Is this a photo of Rocky Mountain National Park? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[landmark_0d23f6c345b68c05]
+Question: Is this an image of Monte Olivia? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[landmark_0d7716f4aed0c9fa]
+Question: Is this a photo of Grumentum, Parco archeologico? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[landmark_0e0511c6e33636ca]
+Question: Is this a picture of Villa Belvedere (San Giuliano Terme)? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[landmark_17e0cd732e35d4aa]
+Question: Is this a photo of Millennium Tower (San Francisco, California)? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[landmark_fagervik_church]
+Question: Is this a photo of Fagervik Church? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[landmark_jagdschloss]
+Question: Is this an image of Jagdschloss Platte? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[landmark_silte_kyrka]
+Question: Is this an image of Silte kyrka? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[position_000000031248]
+Question: Is there a sofa in the middle of potted plants in the image? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[position_000000211825]
+Question: Is the cake on the left side of the camera? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[position_000000477955]
+Question: Is the person under the kite? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[position_clock_under_people]
+Question: Is the clock under people? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[position_vase_right_toothbrush]
+Question: Is the vase on the right of the toothbrush? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[scene_Places365_val_00000034]
+Question: Does this image describe a place of galley? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[scene_Places365_val_00000035]
+Question: Is this photo taken in a place of kennel outdoor? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[scene_Places365_val_00000069_1]
+Question: Is this picture captured in a place of alcove? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[scene_Places365_val_00000069]
+Question: Is this picture captured in a place of mausoleum? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[scene_Places365_val_00000071]
+Question: Is this picture captured in a place of youth hostel? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[scene_Places365_val_00000082]
+Question: Is this photo taken in a place of recreation room? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[scene_Places365_val_00000135]
+Question: Is this picture captured in a place of islet? Please answer yes or no.
+Vanilla: islet  (GT: Yes)
+Ours: Yes
+
+[scene_Places365_val_00000166]
+Question: Is this photo taken in a place of dorm room? Please answer yes or no.
+Vanilla: No  (GT: Yes)
+Ours: Yes
+
+[scene_Places365_val_00000193]
+Question: Is this picture captured in a place of closet? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[scene_subway_platform]
+Question: Is this photo taken in a place of subway station platform? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No
+
+[scene_viaduct]
+Question: Is this photo taken in a place of viaduct? Please answer yes or no.
+Vanilla: Yes  (GT: No)
+Ours: No

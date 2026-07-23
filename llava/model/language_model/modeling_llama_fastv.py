@@ -9,11 +9,13 @@ from transformers.modeling_outputs import BaseModelOutputWithPast
 R_dict = {
     "7b": {
         2: {
+            256: 235,
             192: 166,
             128: 98,
             64: 29, # 30
         },
         3: {
+            256: 223,
             192: 152,
             128: 81,
             64: 11,
@@ -61,7 +63,10 @@ class FastVLlamaModel(LlamaModel):
 
         # FastV config
         self.K = fastv_config["K"]
-        self.R = R_dict[self.scale][self.K][fastv_config["T"]]
+        if "R" in fastv_config:
+            self.R = fastv_config["R"]
+        else:
+            self.R = R_dict[self.scale][self.K][fastv_config["T"]]
         if self.anyres:
             self.R *= 5
     
