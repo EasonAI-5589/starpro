@@ -1,13 +1,79 @@
+# ===== LLaVA-STAR-Pro2 repo .gitignore (code-only push) =====
+# caches / bytecode
 __pycache__/
-*.pyc
-*.pyo
-*.pre_duet
-_duet_*.py
-# eval artifacts / logs
-results/
-playground/data/eval/*/answers/
-# never commit weights or bulk data
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+.cache/
+**/.cache/
+.DS_Store
+
+# model weights / large binaries (never in repo)
 *.bin
-*.pth
 *.pt
+*.pth
+*.ckpt
 *.safetensors
+*.gguf
+*.onnx
+*.h5
+*.pkl
+*.npy
+*.npz
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.mp4
+*.avi
+*.mov
+
+# data / eval artifacts / outputs
+data/
+playground/data/
+**/answers/
+results/
+outputs/
+output/
+logs/
+*.log
+wandb/
+runs/
+eval_results/
+checkpoints/
+ckpt*/
+*.jsonl
+
+# our safety backups / scratch
+*.pre_*
+*.bak
+*.bak_*
+_duet_*.py
+
+# env
+.env
+*.pem
+*.key
+id_rsa*
+
+# experiment output dirs / logs (broader)
+results*/
+experiments*/
+logs*/
+*.fulllog
+*.output
+*.out
+merge.jsonl
+aihc_jobspecs/
+
+# visualization / paper artifacts (not code)
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*_vis/
+*visualization*/
+zzz_*/
+ablations_*/
+vis_samples*.json

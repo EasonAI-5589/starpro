@@ -1,0 +1,27 @@
+[
+  {
+    "image": "/mnt/eason_ckp/LLaVA-Eval/mm-vet/mm-vet/images/v1_60.png",
+    "question": "Which country has a below-average profit margin?",
+    "name": "v1_60_profit_margin"
+  },
+  {
+    "image": "/mnt/eason_ckp/LLaVA-Eval/mm-vet/mm-vet/images/v1_67.png",
+    "question": "Which one is unsweetened?",
+    "name": "v1_67_unsweetened"
+  },
+  {
+    "image": "/mnt/eason_ckp/LLaVA-Eval/mm-vet/mm-vet/images/v1_89.jpg",
+    "question": "What are all the scene text in the image?",
+    "name": "v1_89_scene_text"
+  },
+  {
+    "image": "/mnt/eason_ckp/LLaVA-Eval/mm-vet/mm-vet/images/v1_181.jpg",
+    "question": "Can you give a short introduction to this painting?",
+    "name": "v1_181_painting"
+  },
+  {
+    "image": "/mnt/eason_ckp/LLaVA-Eval/mm-vet/mm-vet/images/v1_202.jpg",
+    "question": "Can you give a short introduction to this person?",
+    "name": "v1_202_person"
+  }
+]
