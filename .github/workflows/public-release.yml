@@ -1,0 +1,23 @@
+name: Public release checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Check public-release boundaries
+        run: bash scripts/check_public_release.sh
+      - name: Compile Python sources
+        run: python -m compileall -q llava
+      - name: Parse shell entry points
+        run: bash -n scripts/*.sh

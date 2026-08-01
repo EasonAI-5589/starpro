@@ -73,29 +73,25 @@ STAR_V2_SCHEDULE = {
 # Stage 1 (llava_arch): 576 -> target*2 (THCP pruning, adaptive to target)
 # Stage 2 (here): target*2 -> target (text-guided progressive pruning)
 # Goal: Average tokens across all layers = target budget (exact)
-# Strategy: 2-3 pruning steps with front-heavy distribution (more tokens in early layers)
-# Note: For anyres mode, target is automatically multiplied by 5 in __init__
+# Strategy: two pruning steps using the layer/count rows reported in the paper
+# Note: Anyres callers pass the paper's nominal 640/320/160 budgets directly.
 STAR_PRO_SCHEDULE = {
     "7b": {
         # Pad mode targets (user passes T, actual target = T)
-        192: [(8, 192), (16, 144), (24, 96)],      # Stage 1: 384 → Avg = 192.0
-        128: [(12, 64), (24, 32)],                 # Stage 1: 256 → Avg = 128.0 (progressive front-heavy)
-        64: [(12, 32), (24, 16)],                  # Stage 1: 128 → Avg = 64.0
-        32: [(12, 16), (24, 8)],                   # Stage 1: 64 → Avg = 32.0
+        128: [(12, 74), (20, 36)],                 # Stage 1: 256 → Avg = 128.0
+        64: [(12, 37), (20, 18)],                  # Stage 1: 128 → Avg = 64.0
+        32: [(12, 17), (20, 10)],                  # Stage 1: 64 → Avg = 32.0
         # Anyres mode targets (user passes T, actual target = T*5)
-        960: [(8, 960), (16, 720), (24, 480)],     # Stage 1: 1920 → Avg = 960.0 (user T=192)
-        640: [(12, 320), (24, 160)],               # Stage 1: 1280 → Avg = 640.0 (user T=128)
-        320: [(12, 160), (24, 80)],                # Stage 1: 640 → Avg = 320.0 (user T=64)
-        160: [(12, 80), (24, 40)],                 # Stage 1: 320 → Avg = 160.0 (user T=32)
+        640: [(12, 367), (20, 182)],               # Stage 1: 1280 → Avg = 640.0 (user T=128)
+        320: [(12, 182), (20, 92)],                # Stage 1: 640 → Avg = 320.0 (user T=64)
+        160: [(12, 91), (20, 46)],                 # Stage 1: 320 → Avg = 160.0 (user T=32)
     },
     "13b": {
         # Pad mode targets (user passes T, actual target = T)
-        192: [(15, 128), (30, 64)],                # Stage 1: 384 → Avg = 192.0
         128: [(15, 64), (30, 32)],                 # Stage 1: 256 → Avg = 128.0
         64: [(15, 32), (30, 16)],                  # Stage 1: 128 → Avg = 64.0
         32: [(15, 16), (30, 8)],                   # Stage 1: 64  → Avg = 32.0
         # Anyres mode targets (user passes T, actual target = T*5)
-        960: [(15, 640), (30, 320)],               # Stage 1: 1920 → Avg = 960.0 (user T=192)
         640: [(15, 320), (30, 160)],               # Stage 1: 1280 → Avg = 640.0 (user T=128)
         320: [(15, 160), (30, 80)],                # Stage 1: 640 → Avg = 320.0 (user T=64)
         160: [(15, 80), (30, 40)],                 # Stage 1: 320 → Avg = 160.0 (user T=32)
@@ -236,9 +232,22 @@ class STARVLMModel(LlamaModel):
         # Load pruning schedule based on mode
         if self.mode == "star_pro":
             # STAR-PRO: Two-stage mode with adaptive schedule (Stage 1 gives target*2)
-            # Note: User should pass T=128 for pad, T=640 for anyres (manually adjusted)
+            # Paper budgets are passed directly: 128/64/32 for pad and
+            # 640/320/160 for the standardized five-crop anyres setting.
             import os as _os
             _stage1_mult = float(_os.environ.get("STAGE1_MULT", "2"))
+            _paper_budgets = {640, 320, 160} if self.anyres else {128, 64, 32}
+            if self.target_visual_tokens not in _paper_budgets:
+                raise ValueError(
+                    "Unsupported STAR-Pro paper budget "
+                    f"T={self.target_visual_tokens} for "
+                    f"{'LLaVA-NeXT anyres' if self.anyres else 'LLaVA-1.5 pad'}; "
+                    f"expected one of {sorted(_paper_budgets, reverse=True)}"
+                )
+            if _stage1_mult != 2.0:
+                raise ValueError(
+                    "The paper-aligned STAR-Pro release requires STAGE1_MULT=2"
+                )
             self.visual_token_length = int(self.target_visual_tokens * _stage1_mult)
 
             # Stage 2 Pruning Schedule Ablation Support
@@ -271,8 +280,10 @@ class STARVLMModel(LlamaModel):
                 print(f"  Scale: {self.scale}")
                 print(f"  Aspect ratio: {'anyres' if self.anyres else 'pad'}")
                 print(f"  User passed T: {starvlm_config['T']}")
-                print(f"  Expected input from Stage 1: {self.visual_token_length} tokens (T × 2)")
-                print(f"  Stage 1 method: THCP (adaptive to target)")
+                _s1_mult = os.environ.get('STAGE1_MULT', '2')
+                _s1_scorer = os.environ.get('STAGE1_SCORER', 'qr')
+                print(f"  Expected input from Stage 1: {self.visual_token_length} tokens (T × {_s1_mult})")
+                print(f"  Stage 1 method: {_s1_scorer} (adaptive to target)")
                 print(f"  Target tokens: {self.target_visual_tokens}")
                 print(f"  Pruning schedule: {schedule_name}")
                 print(f"  Schedule: {self.pruning_schedule}")
@@ -620,7 +631,7 @@ class STARVLMModel(LlamaModel):
                     # ========== Stage 2 Text Aggregation Strategy ==========
                     # Read text aggregation mode from environment (for ablation study)
                     # Options: last_token, top_k, multi_token (default), average_all
-                    text_agg_mode = os.environ.get('TEXT_AGG_MODE', 'multi_token')
+                    text_agg_mode = os.environ.get('TEXT_AGG_MODE', 'average_all')
 
                     # Average across heads: (B, seq_len, seq_len)
                     attn_avg = layer_attention.mean(dim=1)  # (B, seq_len, seq_len)
@@ -750,8 +761,65 @@ class STARVLMModel(LlamaModel):
                                       f"max={visual_attention.max():.4f}")
 
                     # Select top-k important visual tokens (text-guided)
-                    keep_indices = torch.topk(visual_attention, k=target_visual_length).indices
-                    keep_indices = keep_indices.sort().values  # Sort to maintain position order
+                    # [STARPRO-PATCH 20260724 wqr-gate] STAGE2_SELECTOR=wqr:
+                    # attention-weighted pivoted QR = greedy MAP of the
+                    # conditional-DPP kernel diag(r)·S·diag(r); default topk
+                    # unchanged.
+                    _s2_sel = os.environ.get('STAGE2_SELECTOR', 'topk')
+                    _s2_done = False
+                    if _s2_sel == 'wqr':
+                        import sys as _sysw
+                        try:
+                            _Xw = hidden_states[0, visual_start:visual_end].detach().to(torch.float32)
+                            _w = visual_attention.detach().to(
+                                torch.float32).clamp_min(0.0)
+                            _w = _w / (_w.max() + 1e-12)
+                            _Xw = _Xw * (_w + 1e-6).unsqueeze(1)
+                            _Nv = _Xw.shape[0]
+                            _kk = min(int(target_visual_length), _Nv)
+                            _norms2_0 = (_Xw ** 2).sum(dim=1)
+                            _Rw = _Xw.clone()
+                            _av = torch.ones(
+                                _Nv, dtype=torch.bool, device=_Xw.device)
+                            _picks = []
+                            _eps = 1e-12
+                            while len(_picks) < _kk:
+                                _rn = (_Rw ** 2).sum(dim=1)
+                                _rn = torch.where(
+                                    _av, _rn, torch.full_like(_rn, -1.0))
+                                _iw = int(torch.argmax(_rn).item())
+                                if _rn[_iw] <= _eps:
+                                    _rest = torch.nonzero(_av).flatten()
+                                    _rest = _rest[torch.argsort(
+                                        _norms2_0[_rest], descending=True,
+                                        stable=True)]
+                                    _picks.extend(
+                                        int(_x) for _x in
+                                        _rest[:_kk - len(_picks)].tolist())
+                                    break
+                                _picks.append(_iw)
+                                _av[_iw] = False
+                                _qw = _Rw[_iw] / _Rw[_iw].norm()
+                                _Rw = _Rw - torch.outer(_Rw @ _qw, _qw)
+                            if (len(_picks) != _kk
+                                    or len(set(_picks)) != _kk):
+                                raise ValueError(
+                                    f'bad wqr selection {len(_picks)}')
+                            keep_indices = torch.tensor(
+                                sorted(_picks),
+                                device=visual_attention.device)
+                            _s2_done = True
+                            print(f"[STAR-PRO S2 SELECTOR] wqr layer="
+                                  f"{layer_idx} keep={_kk}/{_Nv}",
+                                  file=_sysw.stderr, flush=True)
+                        except Exception as _ew:
+                            print(f"[STAR-PRO S2 SELECTOR] WARNING: wqr "
+                                  f"failed ({_ew}); falling back to topk",
+                                  file=_sysw.stderr, flush=True)
+                            _s2_done = False
+                    if not _s2_done:
+                        keep_indices = torch.topk(visual_attention, k=target_visual_length).indices
+                        keep_indices = keep_indices.sort().values  # Sort to maintain position order
 
                     # QR anchor preservation (STAGE2_ANCHOR_M): force-keep the top-M strongest QR
                     # coverage anchors at EVERY pruning layer (end-to-end), filling the remaining

@@ -26,6 +26,12 @@ def get_chunk(lst, n, k):
     return chunks[k]
 
 
+def _parse_list_arg(s, default):
+    if s is None: return list(default)
+    if isinstance(s, (list, tuple)): return list(s)
+    return list(eval(s))
+
+
 def eval_model(args):
     # Model
     disable_torch_init()
@@ -89,6 +95,15 @@ def eval_model(args):
     }
 
     use_text_tower = True if args.pruning_method == "trim" or "cdp3" in args.pruning_method or "thcp" in args.pruning_method or args.pruning_method == "star_pro" or args.pruning_method == "prefixvlm" else False
+    use_duet = args.pruning_method == "duet"
+    duet_config = {
+        "dominant": args.dominant, "contextual": args.contextual,
+        "cluster_width": args.cluster_width,
+        "layer_list": _parse_list_arg(args.layer_list, [16, 24]),
+        "image_token_ratio_list": _parse_list_arg(args.image_token_ratio_list, [0.5, 0.0]),
+        "use_salient_tokens": bool(args.compute_salient_tokens),
+        "visual_token_num": args.visual_token_num,
+    }
     tokenizer, model, image_processor, context_len = load_pretrained_model(
         model_path, args.model_base, model_name,
         pruning_method=args.pruning_method,
@@ -105,6 +120,7 @@ def eval_model(args):
         use_star=use_star, star_config=star_config,
         use_vscan=use_vscan, vscan_config=vscan_config,
         use_text_tower=use_text_tower,
+        use_duet=use_duet, duet_config=duet_config,
     )
 
     # Data
@@ -167,6 +183,18 @@ def eval_model(args):
                     use_cache=True,
                 )
                 visual_token_num = getattr(model.model, 'visual_token_num', 576)
+            elif use_duet:
+                output_ids = model.generate(
+                    input_ids,
+                    images=images,
+                    image_sizes=image_sizes,
+                    idxs=None,
+                    do_sample=True if args.temperature > 0 else False,
+                    temperature=args.temperature,
+                    max_new_tokens=1024,
+                    use_cache=True,
+                )
+                visual_token_num = getattr(model.model, 'visual_token_num', 576)
             else:
                 output_ids, visual_token_num = model.generate(
                     input_ids,
@@ -209,6 +237,12 @@ if __name__ == "__main__":
     parser.add_argument("--single-pred-prompt", action="store_true")
     parser.add_argument("--pruning_method", type=str, default=None)
     parser.add_argument("--visual_token_num", type=int, default=576)
+    parser.add_argument("--dominant", type=int, default=300)
+    parser.add_argument("--contextual", type=int, default=7)
+    parser.add_argument("--cluster_width", type=int, default=4)
+    parser.add_argument("--layer_list", type=str, default="[16,24]")
+    parser.add_argument("--image_token_ratio_list", type=str, default="[0.5,0.0]")
+    parser.add_argument("--compute_salient_tokens", action="store_true", default=False)
     parser.add_argument("--vscan_stage2_tokens", type=int, default=32,
                         help="VScan Stage 2 tokens (default: 32)")
     parser.add_argument("--vscan_prune_layer", type=int, default=16,

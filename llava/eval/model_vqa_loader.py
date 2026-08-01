@@ -149,7 +149,7 @@ def eval_model(args):
     }
 
     # 🔬 VScan Configuration (Tencent's Training-Free Visual Token Reduction)
-    # Reference: https://github.com/Tencent/SelfEvolvingAgent/tree/main/VScan
+    # Reference implementation: VScan.
     # Stage 1 (llava_arch): Complementary global and local scans -> stage1_tokens
     # Stage 2 (modeling_llama_vscan): Middle layer pruning -> stage2_tokens
     use_vscan = True if args.pruning_method == "vscan" else False

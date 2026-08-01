@@ -1,14 +1,24 @@
-# ===== LLaVA-STAR-Pro2 repo .gitignore (code-only push) =====
-# caches / bytecode
+# Python and local environments
 __pycache__/
 *.py[cod]
 *.egg-info/
-.ipynb_checkpoints/
 .cache/
-**/.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
 .DS_Store
 
-# model weights / large binaries (never in repo)
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa*
+
+# Model weights and archives
 *.bin
 *.pt
 *.pth
@@ -25,55 +35,35 @@ __pycache__/
 *.tgz
 *.zip
 *.7z
-*.mp4
-*.avi
-*.mov
 
-# data / eval artifacts / outputs
+# Data, evaluation artifacts, and logs
 data/
 playground/data/
 **/answers/
+**/answers_upload/
+eval_submissions/
 results/
+results*/
 outputs/
 output/
 logs/
-*.log
+logs*/
 wandb/
 runs/
-eval_results/
 checkpoints/
 ckpt*/
 *.jsonl
+*.xlsx
+*.tsv
+*.log
+*.out
+*.output
 
-# our safety backups / scratch
+# Internal experiment orchestration and paper scratch
+aihc_scripts/
+aihc_jobspecs/
+rebuttal/
+bot*_monitor_status.md
 *.pre_*
 *.bak
 *.bak_*
-_duet_*.py
-
-# env
-.env
-*.pem
-*.key
-id_rsa*
-
-# experiment output dirs / logs (broader)
-results*/
-experiments*/
-logs*/
-*.fulllog
-*.output
-*.out
-merge.jsonl
-aihc_jobspecs/
-
-# visualization / paper artifacts (not code)
-*.png
-*.jpg
-*.jpeg
-*.pdf
-*_vis/
-*visualization*/
-zzz_*/
-ablations_*/
-vis_samples*.json

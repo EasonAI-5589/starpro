@@ -1,225 +1,133 @@
+"""CLIP vision tower with the text embeddings required by STAR-Pro QR."""
+
 import torch
 import torch.nn as nn
-
 from transformers import (
-    CLIPVisionConfig, CLIPImageProcessor, CLIPVisionModel, CLIPVisionModelWithProjection,
-    CLIPTextConfig, CLIPTokenizerFast, CLIPTextModel, CLIPTextModelWithProjection,
+    CLIPImageProcessor,
+    CLIPTextModelWithProjection,
+    CLIPTokenizerFast,
+    CLIPVisionConfig,
+    CLIPVisionModel,
+    CLIPVisionModelWithProjection,
 )
-
-
-def hook_k(module, input, output):
-    module.k_output = output
 
 
 class CLIPVisionTower(nn.Module):
     def __init__(self, vision_tower, args, delay_load=False):
         super().__init__()
-
         self.is_loaded = False
-
         self.vision_tower_name = vision_tower
         self.select_layer = args.mm_vision_select_layer
-        self.select_feature = getattr(args, 'mm_vision_select_feature', 'patch')
+        self.select_feature = getattr(args, "mm_vision_select_feature", "patch")
+        self.text_tower = None
 
-        if not delay_load:
-            self.load_model()
-        elif getattr(args, 'unfreeze_mm_vision_tower', False):
+        if not delay_load or getattr(args, "unfreeze_mm_vision_tower", False):
             self.load_model()
         else:
             self.cfg_only = CLIPVisionConfig.from_pretrained(self.vision_tower_name)
 
     def load_model(self, device_map=None):
         if self.is_loaded:
-            print('{} is already loaded, `load_model` called again, skipping.'.format(self.vision_tower_name))
             return
-
-        self.image_processor = CLIPImageProcessor.from_pretrained(self.vision_tower_name)
-        self.vision_tower = CLIPVisionModel.from_pretrained(self.vision_tower_name, device_map=device_map)
+        self.image_processor = CLIPImageProcessor.from_pretrained(
+            self.vision_tower_name
+        )
+        self.vision_tower = CLIPVisionModel.from_pretrained(
+            self.vision_tower_name, device_map=device_map
+        )
         self.vision_tower.requires_grad_(False)
-
         self.is_loaded = True
 
-    def _resolve_device(self, device_map):
-        """把 device_map（str / dict / None）归一成一个具体的 torch.device。
-
-        device_map 可能是 'auto'、'cuda:0'，也可能是 builder 传来的 {"": 0}。
-        text tower 必须和 vision tower 落在同一张卡上，否则后面算 cos 相似度时
-        image_embeds(GPU) 和 text_embeds(CPU) 会设备不匹配。
-        """
-        if device_map is None:
-            return None
+    @staticmethod
+    def _resolve_device(device_map):
         if isinstance(device_map, dict):
             device_map = device_map.get("", "cuda")
         if isinstance(device_map, int):
             return torch.device(f"cuda:{device_map}")
-        if isinstance(device_map, str):
-            return torch.device(device_map if device_map != 'auto' else 'cuda')
-        return None
+        if isinstance(device_map, str) and device_map != "auto":
+            return torch.device(device_map)
+        return torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     def load_text_tower(self, device_map=None):
-        # 方案1: 不传递 device_map，之后手动移动到设备
-        vision_tower_with_projection = CLIPVisionModelWithProjection.from_pretrained(
-            self.vision_tower_name
-        )
-
+        if self.text_tower is not None:
+            return
         device = self._resolve_device(device_map)
-        if device is not None:
-            vision_tower_with_projection = vision_tower_with_projection.to(device)
-
-        self.vision_tower.visual_projection = vision_tower_with_projection.visual_projection
-
+        projected_vision = CLIPVisionModelWithProjection.from_pretrained(
+            self.vision_tower_name
+        ).to(device)
+        self.vision_tower.visual_projection = projected_vision.visual_projection
         self.text_tokenizer = CLIPTokenizerFast.from_pretrained(self.vision_tower_name)
-
-        # 同样处理 text tower
         self.text_tower = CLIPTextModelWithProjection.from_pretrained(
             self.vision_tower_name
-        )
-        if device is not None:
-            self.text_tower = self.text_tower.to(device)
-
+        ).to(device)
         self.text_tower.requires_grad_(False)
-
         self.max_position_embeddings = self.text_tower.config.max_position_embeddings
 
-    def feature_select(self, image_forward_outs, output_attentions=False):
+    def feature_select(self, image_forward_outs):
         image_features = image_forward_outs.hidden_states[self.select_layer]
-        if output_attentions:
-            image_attentions = image_forward_outs.attentions[self.select_layer]
-        if self.select_feature == 'patch':
-            image_features = image_features[:, 1:]
-            if output_attentions:
-                image_attentions = image_attentions[:, :, 0, 1:]
-        elif self.select_feature == 'cls_patch':
-            image_features = image_features
-            if output_attentions:
-                image_attentions = image_attentions
-        else:
-            raise ValueError(f'Unexpected select feature: {self.select_feature}')
-        if output_attentions:
-            return image_features, image_attentions
-        return image_features
+        if self.select_feature == "patch":
+            return image_features[:, 1:]
+        if self.select_feature == "cls_patch":
+            return image_features
+        raise ValueError(f"unexpected select feature: {self.select_feature}")
 
-    def forward_vscan(self, images, shallow_layer=5, deep_layer=-2):
-        """
-        Forward pass for VScan: returns multi-layer features and attentions.
-
-        VScan uses complementary scanning:
-        - Shallow layer (default: 5): Local spatial details via window CLS attention
-        - Deep layer (default: -2): Global semantic information
-
-        Args:
-            images: Input images tensor
-            shallow_layer: Layer index for local features (default: 5)
-            deep_layer: Layer index for global features (default: -2, i.e., second to last)
-
-        Returns:
-            dict with keys:
-                - 'shallow_features': Features from shallow layer (B, N, D)
-                - 'shallow_attentions': CLS attention from shallow layer (B, N)
-                - 'deep_features': Features from deep layer (B, N, D)
-                - 'deep_attentions': CLS attention from deep layer (B, N)
-        """
-        with torch.no_grad():
-            # Forward through vision tower with all hidden states and attentions
-            image_forward_outs = self.vision_tower(
-                images.to(device=self.device, dtype=self.dtype),
-                output_hidden_states=True,
-                output_attentions=True
-            )
-
-            # Get hidden states and attentions
-            hidden_states = image_forward_outs.hidden_states  # tuple of (B, 577, D)
-            attentions = image_forward_outs.attentions  # tuple of (B, num_heads, 577, 577)
-
-            # Shallow layer features and attentions
-            shallow_features = hidden_states[shallow_layer][:, 1:]  # Remove CLS token
-            shallow_attn = attentions[shallow_layer][:, :, 0, 1:]  # CLS to patch attention
-            shallow_attn = shallow_attn.mean(dim=1)  # Average across heads (B, N)
-
-            # Deep layer features and attentions
-            deep_features = hidden_states[deep_layer][:, 1:]  # Remove CLS token
-            deep_attn = attentions[deep_layer][:, :, 0, 1:]  # CLS to patch attention
-            deep_attn = deep_attn.mean(dim=1)  # Average across heads (B, N)
-
-            return {
-                'shallow_features': shallow_features.to(images.dtype),
-                'shallow_attentions': shallow_attn.to(images.dtype),
-                'deep_features': deep_features.to(images.dtype),
-                'deep_attentions': deep_attn.to(images.dtype),
-            }
+    def _encode_text(self, texts):
+        if self.text_tower is None:
+            raise RuntimeError("STAR-Pro requires load_text_tower() before inference")
+        text_inputs = self.text_tokenizer(text=texts, return_tensors="pt")
+        input_length = text_inputs.input_ids.shape[1]
+        segments = (input_length - 1) // self.max_position_embeddings + 1
+        padding = segments * self.max_position_embeddings - input_length
+        device = next(self.text_tower.parameters()).device
+        text_inputs = {
+            key: torch.cat([value, value.new_zeros((value.shape[0], padding))], dim=1)
+            .reshape(-1, self.max_position_embeddings)
+            .to(device)
+            for key, value in text_inputs.items()
+        }
+        return self.text_tower(**text_inputs).text_embeds
 
     @torch.no_grad()
-    def forward(self, images, texts=None, output_attentions=False, vscan_mode=False,
-                shallow_layer=5, deep_layer=-2):
-        # VScan mode: return multi-layer features
-        if vscan_mode:
-            return self.forward_vscan(images, shallow_layer, deep_layer)
-
-        if type(images) is list:
-            image_features = []
-            for image in images:
-                image_forward_out = self.vision_tower(image.to(device=self.device, dtype=self.dtype).unsqueeze(0), output_hidden_states=True)
-                image_feature = self.feature_select(image_forward_out).to(image.dtype)
-                image_features.append(image_feature)
-        else:
-            image_stream = torch.cuda.Stream()
-            text_stream = torch.cuda.Stream()
-            
-            with torch.cuda.stream(image_stream):
-                if output_attentions:
-                    hook_handle_k = self.vision_tower.vision_model.encoder.layers[self.select_layer].self_attn.k_proj.register_forward_hook(hook_k)
-                image_forward_outs = self.vision_tower(images.to(device=self.device, dtype=self.dtype),
-                                                    output_hidden_states=True,
-                                                    output_attentions=output_attentions)
-                image_outputs = self.feature_select(image_forward_outs, output_attentions=output_attentions)
-                if output_attentions:
-                    image_features = (
-                        image_outputs[0].to(images.dtype),
-                        image_outputs[1].to(images.dtype),
-                        self.vision_tower.vision_model.encoder.layers[self.select_layer].self_attn.k_proj.k_output[:, 1:].to(images.dtype),
-                        image_forward_outs.hidden_states[self.select_layer][:, :1].to(images.dtype),
+    def forward(self, images, texts=None, output_attentions=False):
+        if isinstance(images, list):
+            if texts is not None or output_attentions:
+                raise ValueError("STAR-Pro expects a batched image tensor")
+            return [
+                self.feature_select(
+                    self.vision_tower(
+                        image.to(device=self.device, dtype=self.dtype).unsqueeze(0),
+                        output_hidden_states=True,
                     )
-                    hook_handle_k.remove()
-                else:
-                    image_features = image_outputs.to(images.dtype)
-            
-            if texts is not None:
-                with torch.cuda.stream(text_stream):
-                    text_inputs = self.text_tokenizer(text=texts, return_tensors="pt")
-                    text_segment = (text_inputs.input_ids.shape[1] - 1) // self.max_position_embeddings + 1
-                    text_padding = self.max_position_embeddings * text_segment - text_inputs.input_ids.shape[1]
-                    # Get the device of text_tower (may differ from vision tower when using accelerate)
-                    try:
-                        text_tower_device = next(self.text_tower.parameters()).device
-                    except (StopIteration, AttributeError):
-                        text_tower_device = self.device
-                    text_inputs = {
-                        k: torch.cat([v, v.new_zeros((v.shape[0], text_padding))],
-                                     dim=1).reshape(-1, self.max_position_embeddings).to(device=text_tower_device)
-                        for k, v in text_inputs.items()
-                    }
-                    text_embeds = self.text_tower(**text_inputs).text_embeds
+                ).to(image.dtype)
+                for image in images
+            ]
 
-            torch.cuda.synchronize()
+        outputs = self.vision_tower(
+            images.to(device=self.device, dtype=self.dtype),
+            output_hidden_states=True,
+            output_attentions=output_attentions,
+        )
+        image_features = self.feature_select(outputs).to(images.dtype)
+        if output_attentions:
+            attention = outputs.attentions[self.select_layer]
+            if self.select_feature == "patch":
+                attention = attention[:, :, 0, 1:]
+            return image_features, attention.to(images.dtype)
+        if texts is None:
+            return image_features
 
-            if texts is not None:
-                # Get devices for vision_tower components (may differ when using accelerate)
-                try:
-                    post_ln_device = next(self.vision_tower.vision_model.post_layernorm.parameters()).device
-                except (StopIteration, AttributeError):
-                    post_ln_device = self.device
-                try:
-                    projection_device = next(self.vision_tower.visual_projection.parameters()).device
-                except (StopIteration, AttributeError):
-                    projection_device = self.device
-
-                # Move tensors to correct devices
-                image_embeds = self.vision_tower.vision_model.post_layernorm(image_outputs.to(post_ln_device))
-                proj_dtype = next(self.vision_tower.visual_projection.parameters()).dtype
-                image_embeds = self.vision_tower.visual_projection(image_embeds.to(dtype=proj_dtype, device=projection_device))
-                image_features = (image_features, image_embeds, text_embeds)
-
-        return image_features
+        post_layernorm = self.vision_tower.vision_model.post_layernorm
+        image_embeds = post_layernorm(
+            self.feature_select(outputs).to(next(post_layernorm.parameters()).device)
+        )
+        projection = self.vision_tower.visual_projection
+        image_embeds = projection(
+            image_embeds.to(
+                device=next(projection.parameters()).device,
+                dtype=next(projection.parameters()).dtype,
+            )
+        )
+        return image_features, image_embeds, self._encode_text(texts)
 
     @property
     def dummy_feature(self):
@@ -235,10 +143,7 @@ class CLIPVisionTower(nn.Module):
 
     @property
     def config(self):
-        if self.is_loaded:
-            return self.vision_tower.config
-        else:
-            return self.cfg_only
+        return self.vision_tower.config if self.is_loaded else self.cfg_only
 
     @property
     def hidden_size(self):
@@ -250,4 +155,4 @@ class CLIPVisionTower(nn.Module):
 
     @property
     def num_patches(self):
-        return (self.config.image_size // self.config.patch_size) ** 2
+        return self.num_patches_per_side ** 2

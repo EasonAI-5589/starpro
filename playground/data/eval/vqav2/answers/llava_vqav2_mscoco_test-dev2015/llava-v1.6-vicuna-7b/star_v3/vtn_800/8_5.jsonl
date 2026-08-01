@@ -1,6 +1,0 @@
-{"question_id": 390553000, "prompt": "Who is wearing high heel shoes?\nAnswer the question using a single word or phrase.", "text": "Woman", "answer_id": "JexouQmen88gsn5gcbcMTF", "model_id": "llava-v1.6-vicuna-7b", "metadata": {}}
-{"question_id": 92399001, "prompt": "Is he throwing or catching?\nAnswer the question using a single word or phrase.", "text": "Throwing", "answer_id": "TyHxXYABQmAbYEv4nUmjtt", "model_id": "llava-v1.6-vicuna-7b", "metadata": {}}
-{"question_id": 92399002, "prompt": "Does the man have on a do rag?\nAnswer the question using a single word or phrase.", "text": "Yes", "answer_id": "fHpdrk24UMMq6r72MnpejV", "model_id": "llava-v1.6-vicuna-7b", "metadata": {}}
-{"question_id": 92399000, "prompt": "Is there snow on the ground?\nAnswer the question using a single word or phrase.", "text": "No", "answer_id": "3zP8MbJTqLi5fy4mMWQkkj", "model_id": "llava-v1.6-vicuna-7b", "metadata": {}}
-{"question_id": 161181002, "prompt": "Are there waves in the water?\nAnswer the question using a single word or phrase.", "text": "Yes", "answer_id": "hibCH3XKCga4kZKSzpuUVf", "model_id": "llava-v1.6-vicuna-7b", "metadata": {}}
-{"question_id": 161181000, "prompt": "Is someone videoing the event?\nAnswer the question using a single word or phrase.", "text": "Yes", "answer_id": "3bFxaXhQWxMEyHvuBnW27F", "model_id": "llava-v1.6-vicuna-7b", "metadata": {}}

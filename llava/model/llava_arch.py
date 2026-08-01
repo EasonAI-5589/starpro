@@ -4,7 +4,7 @@
 #    you may not use this file except in compliance with the License.
 #    You may obtain a copy of the License at
 #
-#        http://www.apache.org/licenses/LICENSE-2.0
+#        Apache License 2.0
 #
 #    Unless required by applicable law or agreed to in writing, software
 #    distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,7 @@
 
 from abc import ABC, abstractmethod
 
+import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -274,7 +275,7 @@ class LlavaMetaForCausalLM(ABC):
 
         elif self.pruning_method == 'scope':
             # SCOPE: Saliency-Coverage Oriented Token Pruning (NeurIPS 2025)
-            # Reference: https://github.com/kinredon/SCOPE
+            # Reference implementation: SCOPE.
             from llava.model.language_model.scope_utils import scope_select_with_env
 
             # 官方写法: cls_attention_sum = attn_weights[:, :, cls_idx, cls_idx+1:].sum(dim=1)
@@ -1275,13 +1276,11 @@ class LlavaMetaForCausalLM(ABC):
 
         elif self.pruning_method == 'star_pro':
             # ═══════════════════════════════════════════════════════════
-            # STAR-PRO Stage 1: Complementarity-Diversity Greedy Selection
+            # STAR-PRO Stage 1: Feature-Coverage Candidate Pool
             #
             # Selects m₁ = 2×target tokens from vision encoder output.
-            # Score: I_i(S) = C_i + λ·D_i(S)
-            #   C_i = normalize(1 - cos(v_i, t))   (complementarity)
-            #   D_i = 1 - max_{j∈S} cos(v_i, v_j)  (diversity)
-            #   λ = diversity weight (default 1.0)
+            # The paper path uses residual pivoted QR. Legacy selectors remain
+            # available only for controlled ablations through STAGE1_SCORER.
             # ═══════════════════════════════════════════════════════════
             import os
             # Support both new (LAMBDA/DIVERSITY_WEIGHT) and legacy (RELEVANCE_WEIGHT) env vars
@@ -1293,12 +1292,44 @@ class LlavaMetaForCausalLM(ABC):
             stage1_keep = int(self.visual_token_num * stage1_mult)  # target×mult
 
             # Anyres: distribute tokens proportionally across patches
-            tokens_per_patch = stage1_keep // B if (B > 1 and getattr(self.config, 'image_aspect_ratio', 'square') == 'anyres') else stage1_keep
+            _paper_anyres = (
+                B > 1
+                and getattr(self.config, 'image_aspect_ratio', 'square') == 'anyres'
+            )
+            if _paper_anyres and stage1_keep % B != 0:
+                raise ValueError(
+                    "STAR-Pro paper-aligned anyres allocation requires the exact "
+                    f"2T pool ({stage1_keep}) to divide evenly across {B} crop groups"
+                )
+            tokens_per_patch = stage1_keep // B if _paper_anyres else stage1_keep
 
             # Normalize embeddings
             text_norm = text_embeds / (text_embeds.norm(dim=-1, keepdim=True) + 1e-8)  # (M, C)
 
             all_masks = []
+            # [STARPRO-PATCH 20260727 qr-normalize CLS seed]
+            # qr_normalize 归一化后所有 token 范数=1, pivoted-QR 首选会退化到 index 0。
+            # 这里用 CLS→patch 注意力最大的视觉 token 作首选种子, 之后过程不变。
+            # CLS attn 需 output_attentions, 故仅此 scorer 触发一次额外 vision 前向,
+            # 不影响 greedy / qr / qr_centered 等其它路径。
+            _cls_attn_seed = None
+            if os.environ.get('STAGE1_SCORER', 'qr') == 'qr_normalize':
+                import sys as _sysc
+                try:
+                    _vt = self.get_model().get_vision_tower()
+                    with torch.no_grad():
+                        _ca_outs = _vt.vision_tower(
+                            images.to(device=_vt.device, dtype=_vt.dtype),
+                            output_hidden_states=True, output_attentions=True)
+                    # attentions[select_layer]: (B, heads, 1+N, 1+N); 取 CLS(query0)->patch, 头平均
+                    _ca = _ca_outs.attentions[_vt.select_layer][:, :, 0, 1:].mean(dim=1)  # (B, N)
+                    _cls_attn_seed = _ca.to(torch.float32).to(device)
+                    print('[STAR-PRO S1 SCORER] qr_normalize: CLS-attention first-pick seed enabled (patch 20260727)',
+                          file=_sysc.stderr, flush=True)
+                except Exception as _e:
+                    print(f'[STAR-PRO S1 SCORER] qr_normalize: CLS-attn seed unavailable ({_e}); '
+                          f'falling back to residual-norm first pick', file=_sysc.stderr, flush=True)
+                    _cls_attn_seed = None
             for b in range(B):
                 # Complementarity: C_i = normalize(±cos(v_i, t))
                 emb_norm = image_embeds[b] / (image_embeds[b].norm(dim=-1, keepdim=True) + 1e-8)
@@ -1314,12 +1345,11 @@ class LlavaMetaForCausalLM(ABC):
                 selected = []
                 available = torch.ones(N, dtype=torch.bool, device=device)
 
-                # Optional recovered Stage-1 selectors from the lost
-                # aaai27valc branch. Default stays greedy, so baseline behavior
-                # is unchanged unless STAGE1_SCORER is set.
-                _s1_scorer = os.environ.get('STAGE1_SCORER', 'greedy')
+                # Alternative Stage-1 selectors are retained for controlled
+                # ablations; paper-aligned execution defaults to residual QR.
+                _s1_scorer = os.environ.get('STAGE1_SCORER', 'qr')
                 _s1_alt_done = False
-                if _s1_scorer in ('leverage', 'qr', 'qr_centered', 'random', 'stride'):
+                if _s1_scorer in ('leverage', 'qr', 'qr_centered', 'qr_normalize', 'random', 'stride', 'rpc'):
                     import sys as _sys
                     try:
                         _X = image_features[b].detach().to(torch.float32)
@@ -1327,7 +1357,25 @@ class LlavaMetaForCausalLM(ABC):
                             _X = _X - _X.mean(dim=0, keepdim=True)
                             if b == 0:
                                 print('[STAR-PRO S1 SCORER] qr_centered: mean-centered features before pivoted QR (patch 20260724)', file=_sys.stderr, flush=True)
+                        elif _s1_scorer == 'qr_normalize':
+                            # [STARPRO-PATCH 20260727 qr-normalize] L2-normalize
+                            # each visual token to unit norm before pivoted QR.
+                            # This makes the greedy residual-norm comparison
+                            # ||(I - QQ^T)h|| meaningful across tokens: every h
+                            # starts at ||h||=1, so selection maximizes angular
+                            # spread (Gram volume of unit vectors) instead of
+                            # being dominated by tokens with large raw norm.
+                            _X = _X / _X.norm(dim=1, keepdim=True).clamp_min(1e-8)
+                            if b == 0:
+                                print('[STAR-PRO S1 SCORER] qr_normalize: L2-normalized features (unit norm) before pivoted QR (patch 20260727)', file=_sys.stderr, flush=True)
                         _k = min(tokens_per_patch, N)
+                        # [STARPRO-PATCH 20260724 rpc-gate] optional scorer timing
+                        _timing = os.environ.get('STAGE1_TIMING', '0') == '1'
+                        if _timing:
+                            import time as _time
+                            if _X.is_cuda:
+                                torch.cuda.synchronize()
+                            _t0 = _time.perf_counter()
 
                         if _s1_scorer == 'random':
                             _seed = int(os.environ.get('STAGE1_RAND_SEED', '0'))
@@ -1381,6 +1429,84 @@ class LlavaMetaForCausalLM(ABC):
                             selected = torch.argsort(
                                 _lev, descending=True, stable=True)[:_k].tolist()
 
+                        elif _s1_scorer == 'rpc':
+                            # [STARPRO-PATCH 20260724 rpc-gate v2] accelerated
+                            # randomly pivoted Cholesky (Epperly-Tropp-Webber,
+                            # arXiv:2410.03969): block proposals + rejection,
+                            # exact serial-RPCholesky distribution; the
+                            # per-block rejection walk runs on a small CPU
+                            # copy of the proposed rows so each block costs
+                            # O(1) GPU syncs. STAGE1_RPC_B = pure speed knob.
+                            _seed = int(os.environ.get('STAGE1_RPC_SEED', '0'))
+                            _Bsz = int(os.environ.get('STAGE1_RPC_B', '64'))
+                            _h = int(torch.sum(
+                                _X.reshape(-1)[::997].double()
+                                * 1e6).abs().item()) % (2 ** 31)
+                            _g = torch.Generator(device='cpu')
+                            _g.manual_seed(
+                                (_seed * 1000003 + _h + b) % (2 ** 63 - 1))
+                            _R = _X.clone()
+                            _d = (_R ** 2).sum(dim=1)
+                            _norms2_0 = _d.clone()
+                            _avail = torch.ones(
+                                N, dtype=torch.bool, device=_X.device)
+                            _picks = []
+                            _eps = 1e-8
+                            while len(_picks) < _k:
+                                _dsnap = torch.where(
+                                    _avail, _d.clamp_min(0.0),
+                                    torch.zeros_like(_d))
+                                _dsnap_cpu = _dsnap.detach().cpu()  # sync 1
+                                if float(_dsnap_cpu.sum()) <= _eps:
+                                    _rest = torch.nonzero(_avail).flatten()
+                                    _rest = _rest[torch.argsort(
+                                        _norms2_0[_rest], descending=True,
+                                        stable=True)]
+                                    _picks.extend(
+                                        int(_x) for _x in
+                                        _rest[:_k - len(_picks)].tolist())
+                                    break
+                                _m = min(_Bsz, _k - len(_picks))
+                                _props = torch.multinomial(
+                                    _dsnap_cpu, _m, replacement=True,
+                                    generator=_g)
+                                _u = torch.rand(_m, generator=_g)
+                                _Rprop = _R[_props.to(_X.device)].detach() \
+                                    .cpu()                          # sync 2
+                                _accepted = []   # local rows into _Rprop
+                                _blkQ = None     # CPU (m', dim) block basis
+                                _taken = set()
+                                for _j in range(_m):
+                                    _i = int(_props[_j])
+                                    if _i in _taken or not bool(_avail[_i]):
+                                        continue
+                                    _r_i = _Rprop[_j]
+                                    if _blkQ is not None:
+                                        _r_i = _r_i - (
+                                            _r_i @ _blkQ.t()) @ _blkQ
+                                    _dcur = float((_r_i ** 2).sum())
+                                    if _dcur <= _eps:
+                                        continue
+                                    if (float(_u[_j])
+                                            * float(_dsnap_cpu[_i])
+                                            > _dcur):
+                                        continue
+                                    _q_i = (_r_i / _r_i.norm()).unsqueeze(0)
+                                    _blkQ = _q_i if _blkQ is None else (
+                                        torch.cat([_blkQ, _q_i], dim=0))
+                                    _picks.append(_i)
+                                    _taken.add(_i)
+                                    if len(_picks) >= _k:
+                                        break
+                                if _taken:
+                                    _tk = torch.tensor(
+                                        sorted(_taken), device=_X.device)
+                                    _avail[_tk] = False
+                                    _Qg = _blkQ.to(_X.device)
+                                    _R = _R - (_R @ _Qg.t()) @ _Qg  # GEMM
+                                    _d = (_R ** 2).sum(dim=1)
+                            selected = [int(_i) for _i in _picks]
+
                         else:
                             _norms2_0 = (_X ** 2).sum(dim=1)
                             if not torch.isfinite(_norms2_0).all():
@@ -1390,6 +1516,21 @@ class LlavaMetaForCausalLM(ABC):
                                 N, dtype=torch.bool, device=_X.device)
                             _picks = []
                             _eps = 1e-8
+                            # qr_normalize: 首选用 CLS-attention 最大的视觉 token 作种子
+                            # (归一化后范数全=1, 否则 argmax 退化到 index 0); 之后 greedy 过程不变
+                            if _s1_scorer == 'qr_normalize' and _cls_attn_seed is not None:
+                                _cab = torch.where(
+                                    _avail, _cls_attn_seed[b],
+                                    torch.full_like(_cls_attn_seed[b], -1.0))
+                                _i0 = int(torch.argmax(_cab).item())
+                                _picks.append(_i0)
+                                _avail[_i0] = False
+                                _q0 = _R[_i0] / _R[_i0].norm().clamp_min(1e-12)
+                                _R = _R - torch.outer(_R @ _q0, _q0)
+                                if b == 0:
+                                    print('[STAR-PRO S1 SCORER] qr_normalize: '
+                                          f'first pick = CLS-attn argmax (idx={_i0})',
+                                          file=_sys.stderr, flush=True)
                             while len(_picks) < _k:
                                 _rn = (_R ** 2).sum(dim=1)
                                 _rn = torch.where(
@@ -1416,10 +1557,16 @@ class LlavaMetaForCausalLM(ABC):
                                 f'(want {_k})')
                         available[torch.tensor(selected, device=device)] = False
                         _s1_alt_done = True
+                        _ms = ''
+                        if _timing:
+                            if _X.is_cuda:
+                                torch.cuda.synchronize()
+                            _ms = (' ms={:.2f}'.format(
+                                (_time.perf_counter() - _t0) * 1000.0))
                         print(f"[STAR-PRO S1 SCORER] scorer={_s1_scorer}"
                               + (f" rank={_r}" if _s1_scorer == 'leverage'
                                  else "")
-                              + f" selected={len(selected)}/{N}",
+                              + f" selected={len(selected)}/{N}" + _ms,
                               file=_sys.stderr, flush=True)
                     except Exception as _e:
                         print(f"[STAR-PRO S1 SCORER] WARNING: scorer="
@@ -1451,7 +1598,7 @@ class LlavaMetaForCausalLM(ABC):
                 mask = torch.zeros(N, dtype=torch.bool, device=device)
                 mask[torch.tensor(selected, device=device)] = True
                 all_masks.append(mask)
-                if b == 0 and _s1_alt_done and _s1_scorer in ("qr", "qr_centered", "random"):
+                if b == 0 and _s1_alt_done and _s1_scorer in ("qr", "qr_centered", "qr_normalize", "random", "rpc"):
                     try:
                         _sel_list = [int(x) for x in selected]
                         _rank_by_grid = {g: r for r, g in enumerate(_sel_list)}
@@ -2266,7 +2413,7 @@ class LlavaMetaForCausalLM(ABC):
 
         elif self.pruning_method == 'vscan':
             # ==================== VScan Stage 1: Complementary Global and Local Scans ====================
-            # Reference: https://github.com/Tencent/SelfEvolvingAgent/tree/main/VScan
+            # Reference implementation: VScan.
             # Aligned with official implementation
 
             import os
@@ -2460,7 +2607,7 @@ class LlavaMetaForCausalLM(ABC):
         prune once with HoloV -- i.e. "concatenate-then-prune". Our default (per-crop,
         index-mask) path cannot do anyres because HoloV emits a fixed [B, keep, D] tensor
         that breaks the .view(h, w, 24, 24, -1) spatial reshape.
-        Ref: /mnt/eason/HoloV/llava/model/llava_arch.py (prepare_inputs + HoloV @ L239).
+        The implementation follows HoloV's reassemble-then-prune path.
         Returns a list of per-sample pruned feature tensors [keep, D].
         """
         import os, math as _math
@@ -2513,9 +2660,24 @@ class LlavaMetaForCausalLM(ABC):
                 image_feature = image_feature[0]
                 image_attn = image_attn[0]
 
-            new_num = self.visual_token_num
+            # [STARPRO-PATCH 20260724] anyres 预算修正
+            # 官方 HoloV 的 new_image_token_num 是"重组后整图的绝对保留数"
+            # (官方: HoloV(..., num_patches=16, new_image_token_num=64),在 anyres 重组后剪一次)。
+            # 而 v1_6 脚本传的 TOKEN 是 per-patch 值(PARAM=vtn_$((TOKEN*5))),
+            # 表头 Retain 640/320/160 对应 TOKEN=128/64/32,故 anyres 下须 ×5。
+            # 原实现直接用 visual_token_num,实际只保留 128/64/32,预算小了 5 倍。
+            _n_in = image_feature.shape[0]
+            new_num = self.visual_token_num * 5
+            # [STARPRO-PATCH 20260724] num_patches 沿用原公式 floor(1024/new_num)。
+            # 该公式保持不变量 num_patches x new_num ~= 1024,在官方工作点上与官方配置
+            # (num_patches=16, new_image_token_num=64 -> 16*64=1024) 完全吻合,是从官方配置反推的。
+            # 实测反证:固定 16 配 640 预算(16*640=10240,远离官方 regime)会把预算强制摊到
+            # 16 条水平带、大量浪费在背景带上,NeXT-7B POPE 由 85.7 掉到 69.2 —— 反而削弱基线。
             num_patches = int(os.environ.get("NUM_CROP", max(1, _math.floor(1024 / max(1, new_num)))))
             pruned, _valid = HoloV(image_feature.unsqueeze(0), image_attn.unsqueeze(0), num_patches, new_num)
+            if os.environ.get("ENABLE_DEBUG"):
+                print(f"[HoloV-anyres] {_n_in} -> {pruned.shape[1]} tokens "
+                      f"(target={new_num}, num_crop={num_patches})", flush=True)
             new_image_features.append(pruned[0].to(image_feature.dtype))
 
         return new_image_features
@@ -2526,7 +2688,7 @@ class LlavaMetaForCausalLM(ABC):
     ):
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
-            return input_ids, position_ids, attention_mask, past_key_values, None, labels
+            return input_ids, position_ids, attention_mask, past_key_values, None, labels, 0
 
         if type(images) is list or images.ndim == 5:
             if type(images) is list:
@@ -2547,7 +2709,22 @@ class LlavaMetaForCausalLM(ABC):
                 mm_patch_merge_type = getattr(self.config, 'mm_patch_merge_type', 'flat')
                 mm_patch_merge_type = mm_patch_merge_type.replace('_unpad', '')
                 image_aspect_ratio = getattr(self.config, 'image_aspect_ratio', 'square')
-                if mm_patch_merge_type == 'flat':
+                if self.pruning_method == 'star_pro' and image_aspect_ratio == 'anyres':
+                    # Paper contract: NeXT keeps the natural crop groups, applies
+                    # residual QR inside every group, and concatenates exactly
+                    # the selected 2T decoder embeddings.  The generic
+                    # spatial_unpad path inserts image_newline embeddings and can
+                    # also discard selected padded-grid positions, so it does not
+                    # preserve the reported 2T candidate-pool count.
+                    if merged_features is not None:
+                        raise RuntimeError(
+                            "STAR-Pro paper-aligned NeXT does not merge visual tokens"
+                        )
+                    image_features = [
+                        features.flatten(0, 1)[mask.flatten(0, 1)]
+                        for features, mask in zip(image_features, index_masks)
+                    ]
+                elif mm_patch_merge_type == 'flat':
                     image_features = [x.flatten(0, 1) for x in image_features]
                     index_masks = [x.flatten(0, 1) for x in index_masks]
                     image_features = [x[m] for x, m in zip(image_features, index_masks)]
@@ -2668,6 +2845,7 @@ class LlavaMetaForCausalLM(ABC):
 
         new_input_embeds = []
         new_labels = []
+        starpro_visual_spans = []
         cur_image_idx = 0
         for batch_idx, cur_input_ids in enumerate(input_ids):
             num_images = (cur_input_ids == IMAGE_TOKEN_INDEX).sum()
@@ -2692,6 +2870,7 @@ class LlavaMetaForCausalLM(ABC):
             cur_input_embeds_no_im = torch.split(cur_input_embeds, split_sizes, dim=0)
             cur_new_input_embeds = []
             cur_new_labels = []
+            cur_starpro_spans = []
 
             for i in range(num_images + 1):
                 cur_new_input_embeds.append(cur_input_embeds_no_im[i])
@@ -2699,6 +2878,13 @@ class LlavaMetaForCausalLM(ABC):
                 if i < num_images:
                     cur_image_features = image_features[cur_image_idx]
                     cur_image_idx += 1
+                    if self.pruning_method == 'star_pro':
+                        visual_start = sum(
+                            part.shape[0] for part in cur_new_input_embeds
+                        )
+                        cur_starpro_spans.append(
+                            (visual_start, cur_image_features.shape[0])
+                        )
                     cur_new_input_embeds.append(cur_image_features)
                     cur_new_labels.append(torch.full((cur_image_features.shape[0],), IGNORE_INDEX, device=cur_labels.device, dtype=cur_labels.dtype))
 
@@ -2709,6 +2895,36 @@ class LlavaMetaForCausalLM(ABC):
 
             new_input_embeds.append(cur_new_input_embeds)
             new_labels.append(cur_new_labels)
+            starpro_visual_spans.append(cur_starpro_spans)
+
+        if self.pruning_method == 'star_pro':
+            if len(starpro_visual_spans) != 1 or len(starpro_visual_spans[0]) != 1:
+                raise RuntimeError(
+                    "The paper evaluation contract requires batch size 1 and one "
+                    "contiguous visual sequence per LLaVA example"
+                )
+            visual_start, visual_length = starpro_visual_spans[0][0]
+            star_model = self.get_model()
+            expected_visual_length = int(
+                star_model.target_visual_tokens
+                * float(os.environ.get('STAGE1_MULT', '2'))
+            )
+            if visual_length != expected_visual_length:
+                raise RuntimeError(
+                    "STAR-Pro Adaptive Stage produced an off-paper candidate pool: "
+                    f"got {visual_length}, expected exact 2T={expected_visual_length}"
+                )
+            # Propagate the measured packed span instead of relying on a fixed
+            # prompt offset.  Stage 2 now ranks only the selected visual tokens.
+            star_model.system_prompt_length = visual_start
+            star_model.visual_token_length = visual_length
+            if os.environ.get('ENABLE_DEBUG', '0') == '1':
+                print(
+                    "[STAR-PRO SPAN] "
+                    f"start={visual_start} length={visual_length} "
+                    f"expected_2T={expected_visual_length}",
+                    flush=True,
+                )
 
         # Truncate sequences to max length as image embeddings can make the sequence longer
         tokenizer_model_max_length = getattr(self.config, 'tokenizer_model_max_length', None)
@@ -2995,7 +3211,7 @@ class LlavaMetaForCausalLM(ABC):
 
     # ============================================================
     # VScan Support: Stage 1 (Complementary Global and Local Scans)
-    # Reference: https://github.com/Tencent/SelfEvolvingAgent/tree/main/VScan
+    # Reference implementation: VScan.
     # ============================================================
 
     def window_cls_selection(self, image_attentions, visual_token_num, window_size=6):
@@ -3213,9 +3429,71 @@ class LlavaMetaForCausalLM(ABC):
             image_features = torch.split(image_features, split_sizes, dim=0)
             index_masks = torch.split(index_masks, split_sizes, dim=0)
             mm_patch_merge_type = getattr(self.config, 'mm_patch_merge_type', 'flat')
+            image_aspect_ratio = getattr(self.config, 'image_aspect_ratio', 'square')
             if mm_patch_merge_type == 'flat':
                 image_features = [x.flatten(0, 1) for x in image_features]
                 index_masks = [x.flatten(0, 1) for x in index_masks]
+            elif mm_patch_merge_type.startswith('spatial'):
+                # [STARPRO-VSCAN-ANYRES 20260725] 逐字移植官方 VScan anyres:feature+index_mask 并行
+                # unpad,image_newline 列 mask 恒 True,末尾 image_feature[index_mask] 应用稀疏选择。
+                new_image_features = []
+                for image_idx, (image_feature, index_mask) in enumerate(zip(image_features, index_masks)):
+                    if image_feature.shape[0] > 1:
+                        base_image_feature = image_feature[0]
+                        base_index_mask = index_mask[0]
+                        image_feature = image_feature[1:]
+                        index_mask = index_mask[1:]
+                        height = width = self.get_vision_tower().num_patches_per_side
+                        assert height * width == base_image_feature.shape[0]
+                        if image_aspect_ratio == 'anyres':
+                            num_patch_width, num_patch_height = get_anyres_image_grid_shape(image_sizes[image_idx], self.config.image_grid_pinpoints, self.get_vision_tower().config.image_size)
+                            image_feature = image_feature.view(num_patch_height, num_patch_width, height, width, -1)
+                            index_mask = index_mask.view(num_patch_height, num_patch_width, height, width)
+                        else:
+                            raise NotImplementedError
+                        if 'unpad' in mm_patch_merge_type:
+                            image_feature = image_feature.permute(4, 0, 2, 1, 3).contiguous()
+                            index_mask = index_mask.permute(0, 2, 1, 3).contiguous().unsqueeze(0)
+                            image_feature = image_feature.flatten(1, 2).flatten(2, 3)
+                            index_mask = index_mask.flatten(1, 2).flatten(2, 3)
+                            image_feature = unpad_image(image_feature, image_sizes[image_idx])
+                            index_mask = unpad_image(index_mask, image_sizes[image_idx])
+                            image_feature = torch.cat((
+                                image_feature,
+                                self.model.image_newline[:, None, None].expand(*image_feature.shape[:-1], 1).to(image_feature.device)
+                            ), dim=-1)
+                            index_mask = torch.cat((
+                                index_mask,
+                                torch.ones(*index_mask.shape[:-1], 1, dtype=torch.bool).to(index_mask.device)
+                            ), dim=-1)
+                            image_feature = image_feature.flatten(1, 2).transpose(0, 1)
+                            index_mask = index_mask.flatten(1, 2).squeeze(0)
+                            image_feature = image_feature[index_mask]
+                        else:
+                            image_feature = image_feature.permute(0, 2, 1, 3, 4).contiguous()
+                            index_mask = index_mask.permute(0, 2, 1, 3).contiguous()
+                            image_feature = image_feature.flatten(0, 3)
+                            index_mask = index_mask.flatten(0, 3)
+                            image_feature = image_feature[index_mask]
+                        base_image_feature = base_image_feature[base_index_mask]
+                        image_feature = torch.cat((base_image_feature, image_feature), dim=0)
+                    else:
+                        image_feature = image_feature[0]
+                        index_mask = index_mask[0]
+                        if 'unpad' in mm_patch_merge_type:
+                            image_feature = torch.cat((
+                                image_feature,
+                                self.model.image_newline[None].to(image_feature.device)
+                            ), dim=0)
+                            index_mask = torch.cat((
+                                index_mask,
+                                torch.ones(1, dtype=torch.bool).to(index_mask.device)
+                            ), dim=0)
+                        image_feature = image_feature[index_mask]
+                    if os.environ.get("ENABLE_DEBUG","0")=="1":
+                        print(f"[VSCAN-TOTAL-TOK] image {image_idx} kept={image_feature.shape[0]}")
+                    new_image_features.append(image_feature)
+                image_features = new_image_features
         else:
             image_features, index_masks, image_attns = self.encode_images_vscan(images)
             new_image_features = []
