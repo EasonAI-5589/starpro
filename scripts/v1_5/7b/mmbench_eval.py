@@ -20,10 +20,10 @@ parser.add_argument('--xlsx', type=str, default="/mnt/eason/LLaVA-STAR-Pro/playg
 parser.add_argument('--judge', type=str, default='gpt-4o',
                     choices=['chatgpt-0125', 'gpt-4-0125', 'gpt-4o', 'exact_matching'],
                     help='评测用的 judge 模型 (默认: gpt-4o)')
-parser.add_argument('--api-key', type=str, default="sk-xZHiJMncDzoyQhhcS9ho2xju1NKM2xiIMV1oJapMrXhgmPUS",
-                    help='OpenAI API Key，也可通过环境变量 OPENAI_API_KEY 或 .env 文件设置')
-parser.add_argument('--api-base', type=str, default="https://www.dmxapi.cn/v1/chat/completions",
-                    help='OpenAI API Base URL（使用代理时设置）')
+parser.add_argument('--api-key', type=str, default=None,
+                    help='OpenAI API Key；建议通过环境变量 OPENAI_API_KEY 或 .env 文件设置')
+parser.add_argument('--api-base', type=str, default=None,
+                    help='可选的 OpenAI-compatible API base；默认使用 SDK 配置')
 parser.add_argument('--dataset', type=str, default='mmbench_dev_20230712',
                     help='数据集名称，中文版传 MMBench_DEV_CN (默认: MMBench_DEV_EN)')
 args = parser.parse_args()
