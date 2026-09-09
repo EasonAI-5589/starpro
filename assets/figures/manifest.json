@@ -1,0 +1,89 @@
+{
+  "paper": "https://arxiv.org/abs/2609.05916v1",
+  "source": "Original figure artwork from the published paper source",
+  "rendering": "PNG rendered with Poppler; no plotted values changed",
+  "figures": [
+    {
+      "file": "fig1-performance.png",
+      "figure": 1,
+      "paper_page": 1,
+      "width": 1600,
+      "height": 1662,
+      "sha256": "4cab2a9618dfa2ecd8344435ced612210617bce257d7747284b5a54605e7ad37"
+    },
+    {
+      "file": "fig2-empirical-study.png",
+      "figure": 2,
+      "paper_page": 2,
+      "width": 2200,
+      "height": 677,
+      "sha256": "e0c7b4889e4a7181b30aaef1c8a5a14b9cafa7092f2f028ef11aaed9214b8ec9"
+    },
+    {
+      "file": "fig3-method.png",
+      "figure": 3,
+      "paper_page": 4,
+      "width": 2200,
+      "height": 1238,
+      "sha256": "a483ccb979a071acafb9da4e278441dfbc546288af26bd8a7d5544a2b29a0441"
+    },
+    {
+      "file": "fig4-efficiency.png",
+      "figure": 4,
+      "paper_page": 7,
+      "width": 2200,
+      "height": 893,
+      "sha256": "b0dbe977c4ea853801453d4e3cae015c2494708bf223c45d0ffbb4d88f37f5d0"
+    },
+    {
+      "file": "fig5-ablations.png",
+      "figure": 5,
+      "paper_page": 7,
+      "width": 2200,
+      "height": 824,
+      "sha256": "638b25fcf75478052e909a7b8a00d2bbf2cc52722ca81bd77def5ece9b11a0a3"
+    },
+    {
+      "file": "fig6a-schedule-surface.png",
+      "figure": 6,
+      "paper_page": 20,
+      "width": 1600,
+      "height": 1277,
+      "sha256": "4d773321e46f715a749ba6641c1bfbe53ece9ca510d9eae1c76a887ce4adf5e3"
+    },
+    {
+      "file": "fig6b-schedule-reference.png",
+      "figure": 6,
+      "paper_page": 20,
+      "width": 1600,
+      "height": 1275,
+      "sha256": "8f537fcdd6b43d8dd88a3bf31f5fb4a71e32745e4a5c44fea878ee015dfd2f7a"
+    },
+    {
+      "file": "fig6c-schedule-slices.png",
+      "figure": 6,
+      "paper_page": 20,
+      "width": 1600,
+      "height": 759,
+      "sha256": "423e247b3a602f8340f50b0e3bace24726c9abf68ceb450c7216fafe998536ad"
+    },
+    {
+      "file": "fig7-candidate-budget.png",
+      "figure": 7,
+      "paper_page": 21,
+      "width": 2200,
+      "height": 2520,
+      "sha256": "f228547c51863c500bbc140d328f795a3c0ccc11f2eb04508d97e0958b55f270"
+    }
+  ],
+  "branding": [
+    {
+      "file": "../starpro-logo.png",
+      "source": "Original mascot asset embedded in the source artwork for paper Figure 3",
+      "width": 360,
+      "height": 315,
+      "sha256": "fee962c6b1d759be787a1e1b7ea8219a837abe13e64b4c338e0df448fe69c4e5",
+      "processing": "Original image pixels and transparency preserved; textual and EXIF metadata removed"
+    }
+  ]
+}
