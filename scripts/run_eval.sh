@@ -8,6 +8,16 @@ set -euo pipefail
 : "${OUTPUT_FILE:?set OUTPUT_FILE to a new JSONL path}"
 
 T=${T:-64}
+METHOD=${METHOD:-star_pro}
+case "$METHOD" in
+  star_pro|starpro|STAR-Pro) METHOD=star_pro ;;
+  vanilla|divprune|fastv|sparsevlm) ;;
+  DivPrune) METHOD=divprune ;;
+  cdpruner|CDPruner|cdp3) METHOD=cdp3 ;;
+  FastV) METHOD=fastv ;;
+  SparseVLM) METHOD=sparsevlm ;;
+  *) printf 'Unsupported METHOD: %s\n' "$METHOD" >&2; exit 2 ;;
+esac
 ENTRYPOINT=${ENTRYPOINT:-model_vqa_loader}
 CONV_MODE=${CONV_MODE:-llava_v1}
 case "$ENTRYPOINT" in
@@ -19,7 +29,14 @@ case "$T" in
   *) printf 'T must be a paper budget: 128/64/32 for LLaVA-1.5 or 640/320/160 for LLaVA-NeXT\n' >&2; exit 2 ;;
 esac
 
-# Paper settings belong to the runner. Extra options may tune a benchmark,
+case "$METHOD:$T" in
+  fastv:32|fastv:160|sparsevlm:32|sparsevlm:160)
+    printf '%s has no released schedule for T=%s; use 64/128 for LLaVA-1.5 or 320/640 for NeXT\n' "$METHOD" "$T" >&2
+    exit 2
+    ;;
+esac
+
+# Method and paper settings belong to the runner. Extra options may tune a benchmark,
 # but must not silently override the method, budget, inputs, or output path.
 for arg in "$@"; do
   case "$arg" in
@@ -55,7 +72,13 @@ export STAR_KEEP_POSIDS=0
 unset CUSTOM_PRUNING_SCHEDULE
 export ENABLE_DEBUG=${ENABLE_DEBUG:-0}
 
-printf 'integration=llava method=star_pro scorer=qr stage1_mult=2 text_agg=average_all stage2=topk T=%s entrypoint=%s\n' "$T" "$ENTRYPOINT"
+if [[ "$METHOD" == star_pro ]]; then
+  printf 'integration=llava method=star_pro scorer=qr stage1_mult=2 text_agg=average_all stage2=topk T=%s entrypoint=%s\n' "$T" "$ENTRYPOINT"
+elif [[ "$METHOD" == vanilla ]]; then
+  printf 'integration=llava method=vanilla visual_tokens=unpruned entrypoint=%s\n' "$ENTRYPOINT"
+else
+  printf 'integration=llava method=%s nominal_total_T=%s entrypoint=%s\n' "$METHOD" "$T" "$ENTRYPOINT"
+fi
 python -u -m "llava.eval.$ENTRYPOINT" \
   "$@" \
   --model-path "$MODEL_PATH" \
@@ -64,7 +87,7 @@ python -u -m "llava.eval.$ENTRYPOINT" \
   --answers-file "$OUTPUT_FILE" \
   --conv-mode "$CONV_MODE" \
   --temperature 0 \
-  --pruning_method star_pro \
+  --pruning_method "$METHOD" \
   --visual_token_num "$T"
 
 test -s "$OUTPUT_FILE"

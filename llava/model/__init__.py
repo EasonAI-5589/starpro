@@ -1,4 +1,4 @@
-"""Minimal model exports for the anonymous LLaVA STAR-Pro overlay."""
+"""Model exports for the STAR-Pro and LLaVA baseline overlay."""
 
 from .language_model.llava_llama import LlavaLlamaConfig, LlavaLlamaForCausalLM
 

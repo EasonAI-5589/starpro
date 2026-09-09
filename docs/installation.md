@@ -30,8 +30,8 @@ bash scripts/install_overlay.sh ../LLaVA-starpro
 export LLAVA_ROOT="$(cd ../LLaVA-starpro && pwd)"
 ```
 
-The installer copies the files under `llava/` into the base checkout. Use a
-separate checkout for unpruned comparisons. The evaluation runner puts
+The installer copies the files under `llava/` into the base checkout. Select
+`METHOD=vanilla` for unpruned comparisons with the same configuration. The evaluation runner puts
 `LLAVA_ROOT` on `PYTHONPATH`, so installing the upstream training or web-demo
 extras is not required for this inference path.
 
@@ -43,7 +43,7 @@ and training are outside the documented release configuration.
 
 Choose one of the full Vicuna checkpoints supported by this overlay:
 
-| Model | Official checkpoint | Nominal layer-average T |
+| Model | Official checkpoint | STAR-Pro nominal layer-average T |
 | --- | --- | --- |
 | LLaVA-1.5-7B | [liuhaotian/llava-v1.5-7b](https://huggingface.co/liuhaotian/llava-v1.5-7b) | 128, 64, 32 |
 | LLaVA-1.5-13B | [liuhaotian/llava-v1.5-13b](https://huggingface.co/liuhaotian/llava-v1.5-13b) | 128, 64, 32 |
@@ -60,6 +60,9 @@ For NeXT, these budgets apply to **five crop groups**: one global crop and a
 [five-crop checkpoint configuration](evaluation.md#model-settings) before
 running. Models based on other language-model families are not supported by this
 Llama-specific overlay.
+
+DivPrune, CDPruner, FastV and SparseVLM share this installation. Their available
+budgets and method commands are listed in the [baseline guide](baselines.md).
 
 Prepare benchmark files using the upstream
 [LLaVA evaluation instructions](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/docs/Evaluation.md).

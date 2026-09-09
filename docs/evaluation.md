@@ -1,6 +1,6 @@
 # Evaluation
 
-[Back to STAR-Pro](../README.md) · [Installation](installation.md)
+[Back to STAR-Pro](../README.md) · [Installation](installation.md) · [Baselines](baselines.md) · [Paper tables](tables.md)
 
 ## Run inference
 
@@ -58,7 +58,7 @@ described below.
 
 ## Model settings
 
-| Model family | Nominal T | Conversation mode | Input contract |
+| Model family | STAR-Pro nominal T | Conversation mode | Input contract |
 | --- | --- | --- | --- |
 | LLaVA-1.5 7B / 13B | 128, 64, 32 | `llava_v1` | Standard 336-pixel CLIP input |
 | LLaVA-NeXT Vicuna 7B / 13B | 640, 320, 160 | `llava_v1` | Five crop groups: one global crop plus a 2 × 2 local grid |
@@ -70,12 +70,14 @@ original checkpoint configuration for baseline comparisons. The default NeXT
 checkpoint permits other grids; this release does not provide general
 variable-crop budget allocation and can reject such inputs.
 
-The runner fixes `pruning_method=star_pro`, residual QR (`STAGE1_SCORER=qr`),
+The runner defaults to `METHOD=star_pro`; use `METHOD=divprune`, `cdpruner`,
+`fastv`, `sparsevlm`, or `vanilla` for the [baseline integrations](baselines.md).
+All methods use greedy decoding by default. For STAR-Pro it fixes residual QR (`STAGE1_SCORER=qr`),
 `STAGE1_MULT=2`, `TEXT_AGG_MODE=average_all`, progressive schedules, top-k
-Stage-2 selection, and greedy decoding. It also clears custom schedules and
+Stage-2 selection. It also clears custom schedules and
 sets the optional anchor/causal/position experiment switches to their default
 zero values. The schedule is selected from the model size and nominal budget.
-Use the budgets for the selected model family.
+Use the budgets for the selected model family and [method](baselines.md#token-budgets).
 
 ## Entry points and input formats
 
@@ -102,7 +104,7 @@ paths and T; overriding the runner's fixed arguments is rejected.
 
 The links below use the same pinned LLaVA revision as the installation guide.
 Start with its [evaluation assets and directory layout](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/docs/Evaluation.md#scripts),
-then follow the dataset-specific preparation instructions. Run STAR-Pro inference
+then follow the dataset-specific preparation instructions. Run inference
 with `scripts/run_eval.sh`; the linked upstream scripts document the subsequent
 conversion and scoring steps.
 
@@ -150,5 +152,9 @@ git diff --check
 ```
 
 These checks cover public-file boundaries, Python/shell syntax, and entry-point
-contracts using stubs. Full benchmark reproduction and performance measurements
-require the actual GPU, models, datasets, and scorers.
+contracts using stubs. With the pinned requirements installed, the same test
+command also runs real CPU tensor tests for baseline selection, prefill, attention
+masks and cached decoding. Without that runtime, tensor tests are explicitly
+skipped. CI installs CPU PyTorch and runs them in a dedicated job.
+Full benchmark reproduction and performance measurements require the actual
+GPU, models, datasets, and scorers.

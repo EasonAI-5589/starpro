@@ -28,6 +28,9 @@ from llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_PATCH
 from llava.mm_utils import get_anyres_image_grid_shape
 
 
+PUBLIC_BASELINE_METHODS = frozenset(("divprune", "cdp3", "fastv", "sparsevlm"))
+
+
 class LlavaMetaModel:
 
     def __init__(self, config, **kwargs):
@@ -140,6 +143,8 @@ class LlavaMetaForCausalLM(ABC):
         return self.get_model().get_vision_tower()
 
     def encode_images(self, images, texts=None):
+        if self.pruning_method == 'cdp3' and texts is None:
+            raise ValueError("CDPruner requires the question text for its CLIP text tower")
         if 'prumerge' in self.pruning_method or self.pruning_method == 'visionzip' or self.pruning_method == 'fastervlm' or self.pruning_method == 'scope' or self.pruning_method == 'prefixvlm' or self.pruning_method == 'HoloV' or self.pruning_method == 'Idea' or self.pruning_method == 'prefixvlm_2' or self.pruning_method == 'svdvlm' or self.pruning_method == 'd2p' :
                 image_features, image_attentions, image_keys, image_cls = self.get_model().get_vision_tower()(images, output_attentions=True)
         elif self.pruning_method == 'trim' or self.pruning_method == 'cdp3' or 'thcp' in self.pruning_method or self.pruning_method == 'star_pro':
@@ -160,6 +165,13 @@ class LlavaMetaForCausalLM(ABC):
             image_features = self.get_model().get_vision_tower()(images)
         
         B, N, C = image_features.shape
+        if self.pruning_method in PUBLIC_BASELINE_METHODS:
+            expected_crops = self.public_baseline_crop_count
+            if B != expected_crops or N != 576:
+                raise ValueError(
+                    f"Released baseline inference expects {expected_crops} crop(s) "
+                    f"of 576 patch tokens for one image; got shape {tuple(image_features.shape)}"
+                )
         device = image_features.device
         index_masks = torch.ones(B, N, dtype=torch.bool, device=device)
         merged_features = None
@@ -2690,6 +2702,10 @@ class LlavaMetaForCausalLM(ABC):
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
             return input_ids, position_ids, attention_mask, past_key_values, None, labels, 0
 
+        if self.pruning_method in PUBLIC_BASELINE_METHODS:
+            if input_ids.shape[0] != 1 or int((input_ids == IMAGE_TOKEN_INDEX).sum()) != 1:
+                raise ValueError("Released baseline inference requires batch size 1 and one image")
+
         if type(images) is list or images.ndim == 5:
             if type(images) is list:
                 images = [x.unsqueeze(0) if x.ndim == 3 else x for x in images]
@@ -2878,7 +2894,7 @@ class LlavaMetaForCausalLM(ABC):
                 if i < num_images:
                     cur_image_features = image_features[cur_image_idx]
                     cur_image_idx += 1
-                    if self.pruning_method == 'star_pro':
+                    if self.pruning_method == 'star_pro' or self.pruning_method in PUBLIC_BASELINE_METHODS:
                         visual_start = sum(
                             part.shape[0] for part in cur_new_input_embeds
                         )
@@ -2896,6 +2912,23 @@ class LlavaMetaForCausalLM(ABC):
             new_input_embeds.append(cur_new_input_embeds)
             new_labels.append(cur_new_labels)
             starpro_visual_spans.append(cur_starpro_spans)
+
+        if self.pruning_method in PUBLIC_BASELINE_METHODS:
+            if len(starpro_visual_spans) != 1 or len(starpro_visual_spans[0]) != 1:
+                raise ValueError("Baseline inference requires one contiguous visual sequence")
+            visual_start, visual_length = starpro_visual_spans[0][0]
+            expected_visual_length = (
+                self.target_visual_tokens if self.pruning_method in ('divprune', 'cdp3')
+                else 576 * self.public_baseline_crop_count
+            )
+            if visual_length != expected_visual_length:
+                raise ValueError(
+                    f"Unexpected baseline visual span: got {visual_length}, "
+                    f"expected {expected_visual_length}"
+                )
+            if self.pruning_method in ('fastv', 'sparsevlm'):
+                self.get_model().system_prompt_length = visual_start
+                self.get_model().visual_token_length = visual_length
 
         if self.pruning_method == 'star_pro':
             if len(starpro_visual_spans) != 1 or len(starpro_visual_spans[0]) != 1:
@@ -2929,6 +2962,8 @@ class LlavaMetaForCausalLM(ABC):
         # Truncate sequences to max length as image embeddings can make the sequence longer
         tokenizer_model_max_length = getattr(self.config, 'tokenizer_model_max_length', None)
         if tokenizer_model_max_length is not None:
+            if self.pruning_method in PUBLIC_BASELINE_METHODS and new_input_embeds[0].shape[0] > tokenizer_model_max_length:
+                raise ValueError("The baseline multimodal sequence exceeds tokenizer_model_max_length")
             new_input_embeds = [x[:tokenizer_model_max_length] for x in new_input_embeds]
             new_labels = [x[:tokenizer_model_max_length] for x in new_labels]
 

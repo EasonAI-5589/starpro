@@ -2,7 +2,7 @@
 #
 #    Licensed under the Apache License, Version 2.0 (the "License");
 
-"""Minimal checkpoint loader for the LLaVA STAR-Pro paper configurations."""
+"""Checkpoint loader for the released STAR-Pro and LLaVA baseline configurations."""
 
 import torch
 from transformers import AutoTokenizer, BitsAndBytesConfig
@@ -75,7 +75,7 @@ def load_pretrained_model(
     vision_tower = model.get_vision_tower()
     if not vision_tower.is_loaded:
         vision_tower.load_model(device_map=device_map)
-    if use_text_tower:
+    if use_text_tower or kwargs.get("pruning_method") == "cdp3":
         vision_tower.load_text_tower(device_map=device_map)
     image_processor = vision_tower.image_processor
     context_len = getattr(model.config, "max_sequence_length", 2048)

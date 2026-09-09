@@ -1,6 +1,6 @@
 # STAR-Pro paper figures
 
-[Repository home](../README.md) · [Paper](https://arxiv.org/abs/2609.05916) · [PDF](https://arxiv.org/pdf/2609.05916v1)
+[Repository home](../README.md) · [Paper tables](tables.md) · [Paper](https://arxiv.org/abs/2609.05916) · [PDF](https://arxiv.org/pdf/2609.05916v1)
 
 Figures below are rendered from the figure sources used in **arXiv:2609.05916v1**
 (5 September 2026). They preserve the published artwork and plotted values.

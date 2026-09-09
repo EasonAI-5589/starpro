@@ -1,4 +1,4 @@
-"""CLIP vision tower with the text embeddings required by STAR-Pro QR."""
+"""CLIP vision tower with projected embeddings for STAR-Pro and CDPruner."""
 
 import torch
 import torch.nn as nn
@@ -73,7 +73,7 @@ class CLIPVisionTower(nn.Module):
 
     def _encode_text(self, texts):
         if self.text_tower is None:
-            raise RuntimeError("STAR-Pro requires load_text_tower() before inference")
+            raise RuntimeError("Text-guided pruning requires load_text_tower() before inference")
         text_inputs = self.text_tokenizer(text=texts, return_tensors="pt")
         input_length = text_inputs.input_ids.shape[1]
         segments = (input_length - 1) // self.max_position_embeddings + 1

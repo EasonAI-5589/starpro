@@ -12,7 +12,7 @@
 
 <sub>* Equal contribution. † Corresponding author.</sub>
 
-[Paper](https://arxiv.org/abs/2609.05916) · [PDF](https://arxiv.org/pdf/2609.05916) · [Installation](#quick-start) · [Evaluation](docs/evaluation.md) · [Paper figures](docs/figures.md) · [Citation](#citation)
+[Paper](https://arxiv.org/abs/2609.05916) · [PDF](https://arxiv.org/pdf/2609.05916) · [Installation](#quick-start) · [Evaluation](docs/evaluation.md) · [Baselines](docs/baselines.md) · [Figures](docs/figures.md) · [Tables](docs/tables.md) · [Citation](#citation)
 
 [![Public release checks](https://github.com/EasonAI-5589/starpro/actions/workflows/public-release.yml/badge.svg?branch=main)](https://github.com/EasonAI-5589/starpro/actions/workflows/public-release.yml)
 
@@ -20,7 +20,7 @@
 
 </div>
 
-[Method](#overview) · [Quick start](#quick-start) · [Model checkpoints](#supported-models) · [Results](#performance-across-models) · [Efficiency](#efficiency) · [All figures](docs/figures.md)
+[Method](#overview) · [Quick start](#quick-start) · [Model checkpoints](#supported-models) · [Baseline evaluation](#baseline-evaluation) · [Results](#performance-across-models) · [Efficiency](#efficiency)
 
 ## Overview
 
@@ -89,7 +89,7 @@ benchmark scoring and NeXT image configuration.
 The public code supports the following full LLaVA checkpoints. Each model name
 links to the original provider's download page.
 
-| Model | Checkpoint | Nominal layer-average T |
+| Model | Checkpoint | STAR-Pro nominal layer-average T |
 | --- | --- | --- |
 | LLaVA-1.5-7B | [liuhaotian/llava-v1.5-7b](https://huggingface.co/liuhaotian/llava-v1.5-7b) | 128, 64, 32 |
 | LLaVA-1.5-13B | [liuhaotian/llava-v1.5-13b](https://huggingface.co/liuhaotian/llava-v1.5-13b) | 128, 64, 32 |
@@ -103,6 +103,33 @@ figures are included here, while their code is not part of this LLaVA overlay.
 For data preparation and scoring, follow the
 [benchmark guide](docs/evaluation.md#benchmark-preparation-and-scoring).
 
+## Baseline evaluation
+
+The same overlay also includes **DivPrune, CDPruner, FastV and SparseVLM**, plus
+an unpruned reference. Select the method with `METHOD`; the default is
+`star_pro`. Use the same checkpoint, images, questions and scorer for comparisons.
+
+After setting the paths in [Quick start](#quick-start), evaluate the four
+baselines on LLaVA-1.5 with a nominal budget of 64 tokens:
+
+```bash
+mkdir -p ./baseline-answers
+for method in divprune cdpruner fastv sparsevlm; do
+  METHOD="$method" T=64 OUTPUT_FILE="./baseline-answers/${method}-T64.jsonl" \
+    bash scripts/run_eval.sh
+done
+
+METHOD=vanilla OUTPUT_FILE=./baseline-answers/vanilla.jsonl \
+  bash scripts/run_eval.sh
+```
+
+For the documented five-crop NeXT configuration, use **T=320** instead.
+`T` always denotes the **total** nominal visual-token budget across crop groups;
+the model converts it to each baseline's internal schedule. FastV and SparseVLM
+support T=64/128 on LLaVA-1.5 and T=320/640 on NeXT. DivPrune and CDPruner also
+support the smaller T=32/160 setting. See the [baseline guide](docs/baselines.md)
+for method keys, original implementations and validation scope.
+
 ## Performance across models
 
 <p align="center">
@@ -113,22 +140,32 @@ For data preparation and scoring, follow the
 is normalized to the strongest plotted method. Panel summaries compare STAR-Pro
 with the strongest competing method, relative to the unpruned model.
 
-The following aggressive-budget results come from the paper's
-[Tables 1–3](https://arxiv.org/pdf/2609.05916#page=5):
+The tables below are taken directly from the [published paper](https://arxiv.org/pdf/2609.05916v1),
+including their original captions, values and formatting. Click an image to
+open the full-resolution table.
 
-| Model | Nominal layer-average T | Visual token reduction | Relative performance |
-| --- | ---: | ---: | ---: |
-| LLaVA-1.5-7B | 32 | 94.4% | 94.9% |
-| LLaVA-1.5-13B | 32 | 94.4% | 96.1% |
-| LLaVA-NeXT-7B | 160 | 94.4% | 97.0% |
-| LLaVA-NeXT-13B | 160 | 94.4% | 97.5% |
-| LLaVA-Video-7B | 16 / frame × 64 frames | 90.5% | 92.7% |
-| Qwen3-VL-8B-Instruct | 128 | 90.1% | 91.7% |
-| InternVL3-8B | 128 | 90.0% | 92.2% |
+### LLaVA-1.5 and LLaVA-NeXT
 
-Relative performance uses each paper table's aggregate metric; it is not absolute
-accuracy. The radar and table show different operating points where labeled.
-[Code availability](#supported-models) is listed separately below.
+[![Table 1: original paper results for STAR-Pro and pruning baselines on LLaVA-1.5 and LLaVA-NeXT, with 7B and 13B models.](assets/tables/table01-llava-series.png)](assets/tables/table01-llava-series.png)
+
+<details>
+<summary><strong>Video, Qwen3-VL and InternVL3 results — Tables 2–3</strong></summary>
+
+[![Table 2: original paper results on LLaVA-Video-7B.](assets/tables/table02-video.png)](assets/tables/table02-video.png)
+
+[![Table 3: original paper results on Qwen3-VL-8B and InternVL3-8B.](assets/tables/table03-advanced-architectures.png)](assets/tables/table03-advanced-architectures.png)
+
+These architectures are evaluated in the paper; their code is outside the
+[released LLaVA overlay](#supported-models).
+
+</details>
+
+The [complete gallery of all 16 paper tables](docs/tables.md) includes
+[per-benchmark scores](docs/tables.md#table-6),
+[matched-compute comparisons](docs/tables.md#table-11),
+[token allocation](docs/tables.md#table-12) and
+[candidate-pool sweeps](docs/tables.md#table-13).
+Relative performance follows each original table's aggregate metric.
 
 ## Why two stages?
 
@@ -175,13 +212,16 @@ on schedule robustness and candidate-pool sensitivity across models and budgets.
 | --- | --- |
 | [llava_arch.py](llava/model/llava_arch.py) | Adaptive-Stage QR selection and visual token construction |
 | [modelling_llama_star.py](llava/model/language_model/modelling_llama_star.py) | Progressive pruning and paper schedules |
+| [modeling_llama_fastv.py](llava/model/language_model/modeling_llama_fastv.py) / [modeling_llama_sparsevlm.py](llava/model/language_model/modeling_llama_sparsevlm.py) | FastV and SparseVLM decoder integration |
 | [llava/eval](llava/eval) | Benchmark inference entry points |
 | [assets/figures](assets/figures) | Renderings of all seven paper figures |
-| [docs](docs) | Installation, evaluation and the paper figure gallery |
-| [tests](tests) | CPU-only entry-point contract checks |
+| [assets/tables](assets/tables) | All 16 original paper tables, with extraction metadata |
+| [docs](docs) | Installation, evaluation, baselines and paper galleries |
+| [tests](tests) | Entry-point checks and CPU tensor/prefill/decode tests |
 
 Before contributing, run the [release checks](docs/evaluation.md#local-release-checks).
-The checks verify source boundaries and entry-point contracts; they do not rerun
+The checks verify source boundaries, method dispatch, token selection and cached
+decoding on small CPU models; they do not rerun
 the paper's GPU experiments. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 </details>
@@ -209,9 +249,13 @@ Machine-readable citation metadata is available in [CITATION.cff](CITATION.cff).
 Our implementation builds on [LLaVA](https://github.com/haotian-liu/LLaVA).
 We thank the authors and maintainers of the models, benchmarks and pruning
 baselines used in the paper, including
-[CDPruner](https://github.com/Theia-4869/CDPruner).
+[DivPrune](https://github.com/vbdi/divprune),
+[CDPruner](https://github.com/Theia-4869/CDPruner),
+[FastV](https://github.com/pkunlp-icler/FastV), and
+[SparseVLM](https://github.com/Gumpest/SparseVLMs).
 The STAR-Pro logo is the original artwork used in our paper's method figure.
 
-Code is distributed under the [Apache License 2.0](LICENSE). Preserve upstream
-notices and follow the licenses of the model weights and datasets you use.
+STAR-Pro contributions use the [Apache License 2.0](LICENSE). Preserve the
+[third-party notices](THIRD_PARTY_NOTICES.md) and follow the licenses of the
+upstream code, model weights and datasets you use.
 For sensitive reports, follow [SECURITY.md](SECURITY.md).

@@ -2,7 +2,7 @@
 #
 #    Licensed under the Apache License, Version 2.0 (the "License");
 
-"""LLaVA language-model entry point for the anonymous STAR-Pro release."""
+"""LLaVA entry point for STAR-Pro and the released comparison baselines."""
 
 from typing import List, Optional, Tuple, Union
 
@@ -14,7 +14,27 @@ from transformers.generation.utils import GenerateOutput
 from transformers.modeling_outputs import CausalLMOutputWithPast
 
 from .modelling_llama_star import STARVLMModel
+from .modeling_llama_fastv import FastVLlamaModel
+from .modeling_llama_sparsevlm import SparseLlamaModel
 from ..llava_arch import LlavaMetaForCausalLM, LlavaMetaModel
+
+
+BASELINE_METHODS = frozenset(("divprune", "cdp3", "fastv", "sparsevlm"))
+
+
+def baseline_budget(config, method, total_tokens):
+    """Translate a public total nominal budget into a per-crop schedule key."""
+    aspect = getattr(config, "image_aspect_ratio", None)
+    if aspect not in ("pad", "anyres"):
+        raise ValueError("Baseline configurations require image_aspect_ratio=pad or anyres")
+    if config.num_hidden_layers not in (32, 40):
+        raise ValueError("Released baselines require a 32-layer or 40-layer Llama")
+    crops = 5 if aspect == "anyres" else 1
+    allowed = (64, 128) if method in ("fastv", "sparsevlm") else (32, 64, 128)
+    totals = tuple(value * crops for value in allowed)
+    if isinstance(total_tokens, bool) or not isinstance(total_tokens, int) or total_tokens not in totals:
+        raise ValueError(f"{method} requires total nominal T in {totals}; got {total_tokens!r}")
+    return crops, total_tokens // crops
 
 
 class LlavaLlamaConfig(LlamaConfig):
@@ -35,8 +55,22 @@ class STARLlavaLlamaModel(LlavaMetaModel, STARVLMModel):
         super().__init__(config, starvlm_config=star_config)
 
 
+class FastVLlavaLlamaModel(LlavaMetaModel, FastVLlamaModel):
+    config_class = LlavaLlamaConfig
+
+    def __init__(self, config, fastv_config):
+        super().__init__(config, fastv_config=fastv_config)
+
+
+class SparseLlavaLlamaModel(LlavaMetaModel, SparseLlamaModel):
+    config_class = LlavaLlamaConfig
+
+    def __init__(self, config, sparsevlm_config):
+        super().__init__(config, sparsevlm_config=sparsevlm_config)
+
+
 class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
-    """Vanilla LLaVA plus the single paper method, ``star_pro``."""
+    """Vanilla LLaVA, STAR-Pro, DivPrune, CDPruner, FastV and SparseVLM."""
 
     config_class = LlavaLlamaConfig
 
@@ -47,20 +81,37 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         visual_token_num=None,
         use_star=False,
         star_config=None,
+        use_fastv=False,
+        fastv_config=None,
+        use_sparsevlm=False,
+        sparsevlm_config=None,
         **kwargs,
     ):
         del kwargs
         super(LlamaForCausalLM, self).__init__(config)
 
-        if pruning_method not in (None, "vanilla", "star_pro"):
+        if pruning_method not in (None, "vanilla", "star_pro", *BASELINE_METHODS):
             raise ValueError(
-                "The anonymous STAR-Pro release supports only "
-                f"pruning_method='star_pro' (or 'vanilla'), got {pruning_method!r}"
+                "Supported pruning methods: vanilla, star_pro, divprune, cdp3, fastv, sparsevlm; "
+                f"got {pruning_method!r}"
             )
+        if pruning_method in BASELINE_METHODS:
+            if use_star or (use_fastv and pruning_method != "fastv") or (use_sparsevlm and pruning_method != "sparsevlm"):
+                raise ValueError("Conflicting pruning method and decoder flags")
+            self.public_baseline_crop_count, per_crop = baseline_budget(
+                config, pruning_method, visual_token_num
+            )
+            self.target_visual_tokens = visual_token_num
         if use_star or pruning_method == "star_pro":
             if not star_config:
                 raise ValueError("star_config is required for pruning_method='star_pro'")
             self.model = STARLlavaLlamaModel(config, star_config=star_config)
+        elif pruning_method == "fastv":
+            settings = {"K": 2, **(fastv_config or {}), "T": per_crop}
+            self.model = FastVLlavaLlamaModel(config, fastv_config=settings)
+        elif pruning_method == "sparsevlm":
+            settings = {**(sparsevlm_config or {}), "T": per_crop}
+            self.model = SparseLlavaLlamaModel(config, sparsevlm_config=settings)
         else:
             self.model = LlavaLlamaModel(config)
 
@@ -68,13 +119,13 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         self.vocab_size = config.vocab_size
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
         self.pruning_method = pruning_method or "vanilla"
-        self.visual_token_num = visual_token_num
+        self.visual_token_num = per_crop if pruning_method in BASELINE_METHODS else visual_token_num
 
         # The bundled evaluation entry points expose optional efficiency metrics.
         self.start_latency = False
         self.phase = "prefill"
-        self.start_event = torch.cuda.Event(enable_timing=True)
-        self.end_event = torch.cuda.Event(enable_timing=True)
+        self.start_event = torch.cuda.Event(enable_timing=True) if torch.cuda.is_available() else None
+        self.end_event = torch.cuda.Event(enable_timing=True) if torch.cuda.is_available() else None
         self.prefill_latency = 0.0
         self.decode_latency = 0.0
         self.track_flops = False
@@ -145,6 +196,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
             )
 
         if self.start_latency:
+            if self.start_event is None:
+                raise RuntimeError("CUDA latency measurements require an NVIDIA GPU")
             if self.phase == "prefill" and input_ids is None:
                 self.start_event.record()
             elif self.phase == "decode" and input_ids is not None and input_ids.shape[1] == 1:
@@ -210,6 +263,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
                 texts=texts,
             )
         else:
+            if self.pruning_method in BASELINE_METHODS:
+                raise ValueError("Released baseline generation requires one image")
             inputs_embeds = self.get_model().embed_tokens(inputs)
             visual_token_num = 0
 
@@ -221,6 +276,8 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         )
         if getattr(self.model, "layer_visual_tokens", None):
             self.record_layer_tokens(self.model.layer_visual_tokens)
+            if self.pruning_method in BASELINE_METHODS:
+                visual_token_num = self.model.visual_token_num
         return output, visual_token_num
 
     def prepare_inputs_for_generation(

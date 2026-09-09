@@ -124,6 +124,7 @@ class EvaluationRunnerTests(unittest.TestCase):
                 "IMAGE_FOLDER": str(scratch / "images"),
                 "OUTPUT_FILE": str(output),
                 "ENTRYPOINT": "model_vqa_loader",
+                "METHOD": "star_pro",
                 "T": "64",
                 "CONV_MODE": "llava_v1",
                 "RELEASE_TEST_CAPTURE": str(capture),
@@ -215,6 +216,39 @@ class EvaluationRunnerTests(unittest.TestCase):
         })
         self.assertEqual(json.loads(result.output), {"question_id": "fixture", "text": "test"})
         self.assertIn("artifact_ok rows=1", result.process.stdout)
+
+    def test_each_public_method_reaches_the_correct_evaluation_path(self):
+        methods = {
+            "star_pro": "star_pro", "starpro": "star_pro", "vanilla": "vanilla",
+            "divprune": "divprune", "DivPrune": "divprune",
+            "cdpruner": "cdp3", "CDPruner": "cdp3", "cdp3": "cdp3",
+            "fastv": "fastv", "FastV": "fastv",
+            "sparsevlm": "sparsevlm", "SparseVLM": "sparsevlm",
+        }
+        for public, internal in methods.items():
+            with self.subTest(method=public):
+                result = self.run_runner(env_overrides={"METHOD": public})
+                self.assertEqual(result.process.returncode, 0, result.process.stderr)
+                self.assertEqual(result.capture["parsed"]["pruning_method"], internal)
+                self.assertEqual(result.capture["parsed"]["visual_token_num"], 64)
+                self.assertIn("method=" + internal, result.process.stdout)
+
+    def test_next_budget_reaches_model_without_double_conversion(self):
+        # The model knows the checkpoint's actual crop configuration. The shell
+        # must keep total T intact, including for pre-decoder baseline methods.
+        for method in ("star_pro", "divprune", "cdpruner", "fastv", "sparsevlm"):
+            with self.subTest(method=method):
+                result = self.run_runner(env_overrides={"METHOD": method, "T": "320"})
+                self.assertEqual(result.process.returncode, 0, result.process.stderr)
+                self.assertEqual(result.capture["parsed"]["visual_token_num"], 320)
+
+    def test_unsupported_methods_and_unavailable_schedules_fail_before_launch(self):
+        cases = [{"METHOD": "not_a_method"}, {"METHOD": "vscan"}]
+        cases += [{"METHOD": method, "T": budget}
+                  for method in ("fastv", "sparsevlm") for budget in ("32", "160")]
+        for overrides in cases:
+            with self.subTest(overrides=overrides):
+                self.assert_rejected_before_python(self.run_runner(env_overrides=overrides))
 
     def test_existing_output_is_preserved(self):
         result = self.run_runner(existing_output="preserve this fixture\n")

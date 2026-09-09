@@ -1,0 +1,231 @@
+{
+  "paper": "https://arxiv.org/pdf/2609.05916v1",
+  "source": "Tables extracted directly from the published PDF, including their original captions.",
+  "rendering": "Poppler at 288 dpi; rectangular clipping only. No table content was retyped or redrawn.",
+  "tables": [
+    {
+      "file": "table01-llava-series.png",
+      "table": 1,
+      "page": 5,
+      "crop_points_from_top_left": [
+        48,
+        49,
+        580,
+        236
+      ],
+      "width": 2128,
+      "height": 748,
+      "sha256": "0c58918b6b12703732438937b79e4a411ed3c69a73446263c39ad295588d48b6"
+    },
+    {
+      "file": "table02-video.png",
+      "table": 2,
+      "page": 5,
+      "crop_points_from_top_left": [
+        314,
+        240,
+        564,
+        477
+      ],
+      "width": 1000,
+      "height": 948,
+      "sha256": "5cf926c9414bc4f647540034d062f2663b49c36435fc8eeab28348b6e28b9c06"
+    },
+    {
+      "file": "table03-advanced-architectures.png",
+      "table": 3,
+      "page": 6,
+      "crop_points_from_top_left": [
+        48,
+        49,
+        564,
+        444
+      ],
+      "width": 2064,
+      "height": 1580,
+      "sha256": "9e40c0324516efc6d1ba2bfb068ba39eb7152fe75a44784f67e33b071ec8480e"
+    },
+    {
+      "file": "table04-adaptive-stage-overhead.png",
+      "table": 4,
+      "page": 6,
+      "crop_points_from_top_left": [
+        48,
+        444,
+        299,
+        581
+      ],
+      "width": 1004,
+      "height": 548,
+      "sha256": "2df5590f7201e95f6744ad23cb3bfb1bb36fc6cc386c7a2788116c2caf207aa1"
+    },
+    {
+      "file": "table05-pruning-checkpoints.png",
+      "table": 5,
+      "page": 14,
+      "crop_points_from_top_left": [
+        48,
+        49,
+        564,
+        224
+      ],
+      "width": 2064,
+      "height": 700,
+      "sha256": "4fcd414db6a791a0c490218d727facc71da1e3ee671bb14bd66cca6e1ac1f779"
+    },
+    {
+      "file": "table06-llava15-7b.png",
+      "table": 6,
+      "page": 15,
+      "crop_points_from_top_left": [
+        48,
+        49,
+        564,
+        435
+      ],
+      "width": 2064,
+      "height": 1544,
+      "sha256": "37f9ed602630640560973ea2c812a79cdd1637de06fb36505fbf3586d631a933"
+    },
+    {
+      "file": "table07-llava15-13b.png",
+      "table": 7,
+      "page": 16,
+      "crop_points_from_top_left": [
+        48,
+        49,
+        564,
+        426
+      ],
+      "width": 2064,
+      "height": 1508,
+      "sha256": "ecff81523db561bfb8222603e10a4691e921adf05596bd30c68a823b8c60d175"
+    },
+    {
+      "file": "table08-llava-next-7b.png",
+      "table": 8,
+      "page": 17,
+      "crop_points_from_top_left": [
+        48,
+        49,
+        564,
+        426
+      ],
+      "width": 2064,
+      "height": 1508,
+      "sha256": "16e6022c7667bf544f1510b23621f53e350171754bff291bcf082df0ce954127"
+    },
+    {
+      "file": "table09-llava-next-13b.png",
+      "table": 9,
+      "page": 18,
+      "crop_points_from_top_left": [
+        48,
+        49,
+        564,
+        429
+      ],
+      "width": 2064,
+      "height": 1520,
+      "sha256": "c495806904d7cc52fb75b7f977bcc8e291163033efd97d73873b48e99e59de9d"
+    },
+    {
+      "file": "table10-video-full.png",
+      "table": 10,
+      "page": 19,
+      "crop_points_from_top_left": [
+        48,
+        49,
+        564,
+        336
+      ],
+      "width": 2064,
+      "height": 1148,
+      "sha256": "38df6c803707a756018ae3bde39d0c5cc2217be8f19780e4b09c6b67a7f5e7f6"
+    },
+    {
+      "file": "table11-matched-compute.png",
+      "table": 11,
+      "page": 23,
+      "crop_points_from_top_left": [
+        48,
+        49,
+        564,
+        246
+      ],
+      "width": 2064,
+      "height": 788,
+      "sha256": "6b09d5cdaa90facd1babeff4b12ec4b6ae0e879105a0dc5073a16de8625ff14c"
+    },
+    {
+      "file": "table12-token-allocation.png",
+      "table": 12,
+      "page": 24,
+      "crop_points_from_top_left": [
+        48,
+        104,
+        564,
+        653
+      ],
+      "width": 2064,
+      "height": 2196,
+      "sha256": "5857e4fce69914a6ee0d82d577df36baee94b0e9904083f2836ab30ec285150c"
+    },
+    {
+      "file": "table13-candidate-sweep-llava15-7b.png",
+      "table": 13,
+      "page": 25,
+      "crop_points_from_top_left": [
+        48,
+        65,
+        564,
+        370
+      ],
+      "width": 2064,
+      "height": 1220,
+      "sha256": "d9d77f985d3429be85bda36a3fd724020d1fec91c08a0f218e0e209c4e13c227"
+    },
+    {
+      "file": "table14-candidate-sweep-llava15-13b.png",
+      "table": 14,
+      "page": 25,
+      "crop_points_from_top_left": [
+        48,
+        399,
+        564,
+        692
+      ],
+      "width": 2064,
+      "height": 1172,
+      "sha256": "1fc038d115df3e88f80b854e9db32a608ccafc21be86fb9d2adb6c6cd7d249df"
+    },
+    {
+      "file": "table15-candidate-sweep-llava-next-7b.png",
+      "table": 15,
+      "page": 26,
+      "crop_points_from_top_left": [
+        48,
+        68,
+        564,
+        362
+      ],
+      "width": 2064,
+      "height": 1176,
+      "sha256": "89ce5d2d804634bb1f989df62cbb098e6332cd58567a942ac9a4367e7aa1518d"
+    },
+    {
+      "file": "table16-candidate-sweep-llava-next-13b.png",
+      "table": 16,
+      "page": 26,
+      "crop_points_from_top_left": [
+        48,
+        398,
+        564,
+        689
+      ],
+      "width": 2064,
+      "height": 1164,
+      "sha256": "cf8a90e2072404010258b1781dc44000697fd180ddd3a12d5930780ae256475a"
+    }
+  ]
+}
