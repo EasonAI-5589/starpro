@@ -2,8 +2,6 @@ cff-version: 1.2.0
 message: "If you use STAR-Pro, please cite the accompanying paper."
 title: "STAR-Pro: Stage-Wise Token Adaptive Reduction with Progressive Refinement for Efficient Large Vision-Language Models"
 type: software
-version: 0.1.0
-date-released: 2026-08-01
 license: Apache-2.0
 repository-code: "https://github.com/EasonAI-5589/starpro"
 authors:
@@ -43,3 +41,47 @@ authors:
     given-names: Wenya
   - family-names: Zhang
     given-names: Shanghang
+preferred-citation:
+  type: article
+  title: "STAR-Pro: Stage-Wise Token Adaptive Reduction with Progressive Refinement for Efficient Large Vision-Language Models"
+  journal: "arXiv"
+  year: 2026
+  doi: "10.48550/arXiv.2609.05916"
+  url: "https://arxiv.org/abs/2609.05916"
+  authors:
+    - family-names: Guo
+      given-names: Yichen
+    - family-names: Wang
+      given-names: Tinghao
+    - family-names: Zhang
+      given-names: Qizhe
+    - family-names: Meng
+      given-names: Lingbei
+    - family-names: Zhang
+      given-names: Yuan
+    - family-names: Cao
+      given-names: Jiajun
+    - family-names: Jiang
+      given-names: Hao
+    - family-names: Wu
+      given-names: Chenwei
+    - family-names: Wu
+      given-names: Jixian
+    - family-names: Chen
+      given-names: Sixiang
+    - family-names: Luo
+      given-names: Tao
+    - family-names: Cheng
+      given-names: Hongyang
+    - family-names: Tang
+      given-names: Kai
+    - family-names: Li
+      given-names: Chenxi
+    - family-names: Li
+      given-names: Renyuan
+    - family-names: Huang
+      given-names: Xiande
+    - family-names: Wang
+      given-names: Wenya
+    - family-names: Zhang
+      given-names: Shanghang

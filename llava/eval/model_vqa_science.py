@@ -125,6 +125,8 @@ def eval_model(args):
 
     # Data
     questions = json.load(open(os.path.expanduser(args.question_file), "r"))
+    if args.pruning_method == "star_pro" and any(not item.get("image") for item in questions):
+        raise ValueError("STAR-Pro ScienceQA evaluation requires the image-only subset")
     questions = get_chunk(questions, args.num_chunks, args.chunk_idx)
     answers_file = os.path.expanduser(args.answers_file)
     os.makedirs(os.path.dirname(answers_file), exist_ok=True)

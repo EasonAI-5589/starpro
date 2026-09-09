@@ -60,8 +60,11 @@ ckpt*/
 *.output
 
 # Internal experiment orchestration and paper scratch
-aihc_scripts/
-aihc_jobspecs/
+cluster_scripts/
+jobspecs/
+job_specs/
+internal/
+private/
 rebuttal/
 bot*_monitor_status.md
 *.pre_*
