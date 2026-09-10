@@ -12,7 +12,7 @@
 
 <sub>* Equal contribution. † Corresponding author.</sub>
 
-[Paper](https://arxiv.org/abs/2609.05916) · [PDF](https://arxiv.org/pdf/2609.05916) · [Installation](#quick-start) · [Evaluation](docs/evaluation.md) · [Baselines](docs/baselines.md) · [Figures](docs/figures.md) · [Tables](docs/tables.md) · [Citation](#citation)
+[Paper](https://arxiv.org/abs/2609.05916) · [PDF](https://arxiv.org/pdf/2609.05916) · [Installation](#quick-start) · [Datasets](docs/datasets.md) · [Evaluation](docs/evaluation.md) · [Baselines](docs/baselines.md) · [Figures](docs/figures.md) · [Tables](docs/tables.md) · [Citation](#citation)
 
 [![Public release checks](https://github.com/EasonAI-5589/starpro/actions/workflows/public-release.yml/badge.svg?branch=main)](https://github.com/EasonAI-5589/starpro/actions/workflows/public-release.yml)
 
@@ -68,19 +68,26 @@ bash scripts/install_overlay.sh ../LLaVA-starpro
 export LLAVA_ROOT="$(cd ../LLaVA-starpro && pwd)"
 ```
 
-Choose a [supported checkpoint](#supported-models), prepare an image folder and
-[JSONL questions](docs/evaluation.md#question-and-answer-format), then run:
+Choose a [supported checkpoint](#supported-models), then prepare the
+[evaluation datasets](docs/datasets.md). The official LLaVA `eval.zip` supplies
+prepared evaluation assets; benchmark images and scoring annotations are
+downloaded separately. For example, with GQA prepared under `EVAL_ROOT`:
 
 ```bash
 export MODEL_PATH=/path/to/llava-v1.5-7b
-export QUESTION_FILE=/path/to/questions.jsonl
-export IMAGE_FOLDER=/path/to/images
-export OUTPUT_FILE=/path/to/new/starpro-answers.jsonl
+export EVAL_ROOT=/path/to/LLaVA-Eval
+export QUESTION_FILE="$EVAL_ROOT/gqa/llava_gqa_testdev_balanced.jsonl"
+export IMAGE_FOLDER="$EVAL_ROOT/gqa/data/images"
+export OUTPUT_FILE=./answers/starpro-gqa-T64.jsonl
 
 T=64 bash scripts/run_eval.sh
 ```
 
-The output path must be new. Follow the [installation guide](docs/installation.md)
+The output path must be new. The [dataset guide](docs/datasets.md) lists the
+download sources, exact paths and splits for all ten LLaVA image benchmarks,
+including MMBench's embedded images and ScienceQA's image-only input.
+For custom data, use the [JSONL question format](docs/evaluation.md#question-and-answer-format).
+Follow the [installation guide](docs/installation.md)
 for prerequisites and the [evaluation guide](docs/evaluation.md) for input formats,
 benchmark scoring and NeXT image configuration.
 
@@ -101,7 +108,8 @@ The paper also evaluates **Qwen3-VL, InternVL3 and LLaVA-Video**; their results 
 figures are included here, while their code is not part of this LLaVA overlay.
 
 For data preparation and scoring, follow the
-[benchmark guide](docs/evaluation.md#benchmark-preparation-and-scoring).
+[dataset guide](docs/datasets.md) and
+[scoring guide](docs/evaluation.md#benchmark-preparation-and-scoring).
 
 ## Baseline evaluation
 

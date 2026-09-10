@@ -1,6 +1,6 @@
 # Baseline evaluation
 
-[Back to STAR-Pro](../README.md) · [Installation](installation.md) · [Evaluation](evaluation.md) · [Original paper tables](tables.md)
+[Back to STAR-Pro](../README.md) · [Installation](installation.md) · [Datasets](datasets.md) · [Evaluation](evaluation.md) · [Original paper tables](tables.md)
 
 This overlay includes the LLaVA-1.5 and LLaVA-NeXT Vicuna 7B/13B integrations
 used to compare STAR-Pro with DivPrune, CDPruner, FastV and SparseVLM. All methods
@@ -73,9 +73,10 @@ a different directory when repeating a run. For a different benchmark, set
 For example, to run CDPruner with MMBench circular evaluation:
 
 ```bash
-METHOD=cdpruner T=64 ENTRYPOINT=model_vqa_mmbench \
+QUESTION_FILE="$EVAL_ROOT/mmbench/mmbench_dev_20230712.tsv" \
+  METHOD=cdpruner T=64 ENTRYPOINT=model_vqa_mmbench \
   OUTPUT_FILE=./baseline-answers/cdpruner-mmbench-circular.jsonl \
-  bash scripts/run_eval.sh --all-rounds --lang en
+  bash scripts/run_eval.sh --all-rounds --lang en --single-pred-prompt
 ```
 
 Keep checkpoint weights, image configuration, prompts, decoding settings,

@@ -64,8 +64,9 @@ Llama-specific overlay.
 DivPrune, CDPruner, FastV and SparseVLM share this installation. Their available
 budgets and method commands are listed in the [baseline guide](baselines.md).
 
-Prepare benchmark files using the upstream
-[LLaVA evaluation instructions](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/docs/Evaluation.md).
+Prepare benchmark files using the [dataset guide](datasets.md), which separates
+LLaVA's `eval.zip` assets from each benchmark's images and scoring annotations
+and gives the exact paths expected by this overlay.
 Then follow the [question format example](evaluation.md#question-and-answer-format)
 or the [benchmark preparation and scoring table](evaluation.md#benchmark-preparation-and-scoring)
 to run your first evaluation.

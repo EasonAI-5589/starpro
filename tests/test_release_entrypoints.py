@@ -103,7 +103,9 @@ MOCK_PYTHON = textwrap.dedent("""\
 
 
 class EvaluationRunnerTests(unittest.TestCase):
-    def run_runner(self, args=(), env_overrides=None, existing_output=None):
+    def run_runner(self, args=(), env_overrides=None, existing_output=None,
+                   question_text='{"question_id": "fixture", "text": "What is shown?", "image": "fixture.png"}\n',
+                   question_name="questions.jsonl"):
         with tempfile.TemporaryDirectory(prefix="release-entrypoints-") as temp:
             scratch = Path(temp)
             bin_dir = scratch / "bin"
@@ -113,6 +115,10 @@ class EvaluationRunnerTests(unittest.TestCase):
             python.chmod(0o755)
             output = scratch / "answers.jsonl"
             capture = scratch / "capture.json"
+            questions = scratch / question_name
+            questions.write_text(question_text, encoding="utf-8")
+            images = scratch / "images"
+            images.mkdir()
             if existing_output is not None:
                 output.write_text(existing_output, encoding="utf-8")
             env = os.environ.copy()
@@ -120,8 +126,8 @@ class EvaluationRunnerTests(unittest.TestCase):
                 "PATH": str(bin_dir) + os.pathsep + os.environ.get("PATH", ""),
                 "LLAVA_ROOT": str(scratch / "llava"),
                 "MODEL_PATH": str(scratch / "llava-model"),
-                "QUESTION_FILE": str(scratch / "questions.jsonl"),
-                "IMAGE_FOLDER": str(scratch / "images"),
+                "QUESTION_FILE": str(questions),
+                "IMAGE_FOLDER": str(images),
                 "OUTPUT_FILE": str(output),
                 "ENTRYPOINT": "model_vqa_loader",
                 "METHOD": "star_pro",
@@ -131,7 +137,11 @@ class EvaluationRunnerTests(unittest.TestCase):
                 "RELEASE_TEST_PYTHON": sys.executable,
             })
             if env_overrides:
-                env.update(env_overrides)
+                for name, value in env_overrides.items():
+                    if value is None:
+                        env.pop(name, None)
+                    else:
+                        env[name] = value
             # Running inside the temporary directory contains even a regressed
             # output-path override within disposable test fixtures.
             completed = subprocess.run(
@@ -144,7 +154,7 @@ class EvaluationRunnerTests(unittest.TestCase):
                 output=output.read_text() if output.exists() else None,
                 expected={
                     "model_path": env["MODEL_PATH"], "model_base": None,
-                    "question_file": env["QUESTION_FILE"], "image_folder": env["IMAGE_FOLDER"],
+                    "question_file": env["QUESTION_FILE"], "image_folder": env.get("IMAGE_FOLDER"),
                     "answers_file": str(output), "conv_mode": "llava_v1",
                     "temperature": 0.0, "pruning_method": "star_pro", "visual_token_num": 64,
                 },
@@ -154,6 +164,47 @@ class EvaluationRunnerTests(unittest.TestCase):
         self.assertNotEqual(result.process.returncode, 0, result.process.stdout)
         self.assertIsNone(result.capture, "Rejected input reached the evaluation process")
         self.assertIsNone(result.output)
+
+    def test_missing_or_nonregular_questions_fail_before_launch(self):
+        for entrypoint in ("model_vqa", "model_vqa_loader", "model_vqa_science", "model_vqa_mmbench"):
+            for question_file in ("missing.jsonl", "images"):
+                with self.subTest(entrypoint=entrypoint, question_file=question_file):
+                    result = self.run_runner(env_overrides={
+                        "ENTRYPOINT": entrypoint, "QUESTION_FILE": question_file,
+                    })
+                    self.assert_rejected_before_python(result)
+                    self.assertIn("QUESTION_FILE", result.process.stderr)
+
+    def test_empty_questions_fail_before_launch(self):
+        for entrypoint in ("model_vqa_loader", "model_vqa_mmbench"):
+            with self.subTest(entrypoint=entrypoint):
+                result = self.run_runner(question_text="", env_overrides={"ENTRYPOINT": entrypoint})
+                self.assert_rejected_before_python(result)
+                self.assertIn("QUESTION_FILE", result.process.stderr)
+
+    def test_image_file_entrypoints_require_an_existing_image_directory(self):
+        for entrypoint in ("model_vqa", "model_vqa_loader", "model_vqa_science"):
+            for image_folder in (None, "missing-images", "questions.jsonl"):
+                with self.subTest(entrypoint=entrypoint, image_folder=image_folder):
+                    result = self.run_runner(env_overrides={
+                        "ENTRYPOINT": entrypoint, "IMAGE_FOLDER": image_folder,
+                    })
+                    self.assert_rejected_before_python(result)
+                    self.assertIn("IMAGE_FOLDER", result.process.stderr)
+
+    def test_mmbench_uses_tsv_without_an_image_directory(self):
+        for image_folder, expected in ((None, "."), ("", "."), ("missing-images", "missing-images")):
+            with self.subTest(image_folder=image_folder):
+                result = self.run_runner(
+                    env_overrides={"ENTRYPOINT": "model_vqa_mmbench", "IMAGE_FOLDER": image_folder},
+                    question_name="questions.tsv",
+                    question_text="index\timage\tquestion\n1\tfixture-base64\tWhat is shown?\n",
+                )
+                self.assertEqual(result.process.returncode, 0, result.process.stderr)
+                self.assertEqual(result.capture["argv"][:3], ["-u", "-m", "llava.eval.model_vqa_mmbench"])
+                self.assertEqual(result.capture["parsed"]["question_file"], result.expected["question_file"])
+                self.assertEqual(result.capture["parsed"]["image_folder"], expected)
+                self.assertIn("artifact_ok rows=1", result.process.stdout)
 
     def test_unsupported_entrypoint_and_budget_are_rejected(self):
         for overrides in ({"ENTRYPOINT": "model_vqa_loader_accelerate"}, {"T": "192"}):

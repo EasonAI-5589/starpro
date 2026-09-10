@@ -4,7 +4,6 @@ set -euo pipefail
 : "${LLAVA_ROOT:?set LLAVA_ROOT to the patched LLaVA checkout}"
 : "${MODEL_PATH:?set MODEL_PATH to local model weights}"
 : "${QUESTION_FILE:?set QUESTION_FILE to the benchmark questions}"
-: "${IMAGE_FOLDER:?set IMAGE_FOLDER to the benchmark images}"
 : "${OUTPUT_FILE:?set OUTPUT_FILE to a new JSONL path}"
 
 T=${T:-64}
@@ -35,6 +34,21 @@ case "$METHOD:$T" in
     exit 2
     ;;
 esac
+
+if [[ ! -f "$QUESTION_FILE" || ! -s "$QUESTION_FILE" ]]; then
+  printf 'QUESTION_FILE must be a nonempty regular file: %s\n' "$QUESTION_FILE" >&2
+  exit 2
+fi
+if [[ "$ENTRYPOINT" == model_vqa_mmbench ]]; then
+  # MMBench loads base64 images from its TSV; this CLI argument is unused.
+  IMAGE_FOLDER=${IMAGE_FOLDER:-.}
+else
+  : "${IMAGE_FOLDER:?set IMAGE_FOLDER to the benchmark images}"
+  if [[ ! -d "$IMAGE_FOLDER" ]]; then
+    printf 'IMAGE_FOLDER must be an existing directory: %s\n' "$IMAGE_FOLDER" >&2
+    exit 2
+  fi
+fi
 
 # Method and paper settings belong to the runner. Extra options may tune a benchmark,
 # but must not silently override the method, budget, inputs, or output path.

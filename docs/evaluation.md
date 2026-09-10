@@ -1,17 +1,19 @@
 # Evaluation
 
-[Back to STAR-Pro](../README.md) · [Installation](installation.md) · [Baselines](baselines.md) · [Paper tables](tables.md)
+[Back to STAR-Pro](../README.md) · [Installation](installation.md) · [Datasets](datasets.md) · [Baselines](baselines.md) · [Paper tables](tables.md)
 
 ## Run inference
 
-After applying the overlay and activating the environment, set explicit paths:
+After applying the overlay, activating the environment and following the
+[dataset preparation guide](datasets.md), set explicit paths. For example, GQA:
 
 ```bash
 export LLAVA_ROOT=/path/to/LLaVA-starpro
 export MODEL_PATH=/path/to/llava-v1.5-7b
-export QUESTION_FILE=/path/to/questions.jsonl
-export IMAGE_FOLDER=/path/to/images
-export OUTPUT_FILE=/path/to/new/starpro-answers.jsonl
+export EVAL_ROOT=/path/to/LLaVA-Eval
+export QUESTION_FILE="$EVAL_ROOT/gqa/llava_gqa_testdev_balanced.jsonl"
+export IMAGE_FOLDER="$EVAL_ROOT/gqa/data/images"
+export OUTPUT_FILE=./answers/starpro-gqa-T64.jsonl
 
 T=64 bash scripts/run_eval.sh
 ```
@@ -20,6 +22,9 @@ T=64 bash scripts/run_eval.sh
 questions are JSONL objects with `question_id`, `image`, and `text` fields;
 image paths are relative to `IMAGE_FOLDER`. Use a small prepared subset to check
 inference before running the full official split.
+The runner checks the question file and required image directory before loading
+the model. MMBench reads embedded images from its TSV and does not require
+`IMAGE_FOLDER`.
 
 ## Question and answer format
 
@@ -88,10 +93,13 @@ Use the budgets for the selected model family and [method](baselines.md#token-bu
 | `model_vqa_mmbench` | Official MMBench TSV | Use `--all-rounds` when preparing circular evaluation |
 | `model_vqa_science` | LLaVA-format ScienceQA JSON list: `id`, `image`, and `conversations` | Image-containing subset only; question text comes from `conversations[0].value` |
 
-Example for MMBench:
+Example for MMBench-EN circular evaluation:
 
 ```bash
-ENTRYPOINT=model_vqa_mmbench T=64 bash scripts/run_eval.sh --all-rounds --lang en
+QUESTION_FILE="$EVAL_ROOT/mmbench/mmbench_dev_20230712.tsv" \
+OUTPUT_FILE=./answers/starpro-mmbench-en-circular-T64.jsonl \
+ENTRYPOINT=model_vqa_mmbench T=64 \
+  bash scripts/run_eval.sh --all-rounds --lang en --single-pred-prompt
 ```
 
 Optional arguments are limited to benchmark controls: `--num-chunks`,
@@ -102,24 +110,28 @@ paths and T; overriding the runner's fixed arguments is rejected.
 
 ## Benchmark preparation and scoring
 
-The links below use the same pinned LLaVA revision as the installation guide.
-Start with its [evaluation assets and directory layout](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/docs/Evaluation.md#scripts),
-then follow the dataset-specific preparation instructions. Run inference
+The [dataset guide](datasets.md) provides public download sources and the exact
+question/image paths for each benchmark. The links below use the same pinned
+LLaVA revision as the installation guide. Run inference
 with `scripts/run_eval.sh`; the linked upstream scripts document the subsequent
 conversion and scoring steps.
 
 | Benchmark | Data preparation | STAR-Pro entry point | Conversion and scoring reference |
 | --- | --- | --- | --- |
+| VQAv2 | [Test-dev questions and COCO test2015 images](datasets.md#3-match-the-input-paths) | `model_vqa_loader` | [Submission conversion and VQA evaluation server](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/scripts/v1_5/eval/vqav2.sh) |
 | GQA | [Questions and images](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/docs/Evaluation.md#gqa) | `model_vqa_loader` | [Prediction conversion and GQA evaluator](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/scripts/v1_5/eval/gqa.sh) |
+| VizWiz | [Test questions and images](datasets.md#3-match-the-input-paths) | `model_vqa_loader` | [Submission conversion and VizWiz evaluation server](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/scripts/v1_5/eval/vizwiz.sh) |
 | TextVQA | [Validation data and OCR questions](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/docs/Evaluation.md#textvqa) | `model_vqa_loader` | [TextVQA answer scorer](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/scripts/v1_5/eval/textvqa.sh) |
 | POPE | [COCO questions and annotations](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/docs/Evaluation.md#pope) | `model_vqa_loader` | [POPE scorer](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/scripts/v1_5/eval/pope.sh) |
 | MME | [Images and official evaluation tool](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/docs/Evaluation.md#mme) | `model_vqa_loader` | [Answer conversion and MME scoring](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/scripts/v1_5/eval/mme.sh) |
 | MMBench-EN / CN | [English TSV](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/docs/Evaluation.md#mmbench) / [Chinese TSV](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/docs/Evaluation.md#mmbench-cn) | `model_vqa_mmbench` | [Single-round submission preparation](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/scripts/v1_5/eval/mmbench.sh) and the evaluation server linked in the data guide |
 | ScienceQA (image subset) | [Problems, splits and images](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/docs/Evaluation.md#scienceqa) | `model_vqa_science` | [ScienceQA scorer](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/scripts/v1_5/eval/sqa.sh); report the image-subset metric |
+| MM-Vet | [Original questions and images](datasets.md#3-match-the-input-paths) | `model_vqa` | [Prediction conversion](https://github.com/haotian-liu/LLaVA/blob/c121f0432da27facab705978f83c4ada465e46fd/scripts/v1_5/eval/mmvet.sh) and [official evaluator](https://github.com/yuweihao/MM-Vet) |
 
 Set `QUESTION_FILE` and `IMAGE_FOLDER` to the prepared files for the selected
-benchmark. For ScienceQA, retain only records with an image in the LLaVA-format
-JSON list. For Chinese MMBench, pass `--lang cn`.
+benchmark. For ScienceQA, [prepare the image-only JSON list](datasets.md#prepare-the-scienceqa-image-subset)
+and pass `--single-pred-prompt`. For Chinese MMBench, use the CN TSV and
+`--lang cn --single-pred-prompt`; `IMAGE_FOLDER` is unused.
 
 MMBench circular evaluation uses `--all-rounds` and requires scoring each
 question across its option rotations. The upstream single-round submission
