@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STAR-Pro — Efficient Large Vision-Language Models</title>
+<meta name="description" content="STAR-Pro preserves visual coverage, then progressively refines tokens. Training-free visual token pruning across seven vision-language models and 18 image and video benchmarks.">
+<link rel="canonical" href="https://easonai-5589.github.io/starpro/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="STAR-Pro — Stage-Wise Token Adaptive Reduction">
+<meta property="og:description" content="Preserve coverage. Refine progressively. Training-free visual token pruning for efficient large vision-language models.">
+<meta property="og:url" content="https://easonai-5589.github.io/starpro/">
+<meta property="og:image" content="https://easonai-5589.github.io/starpro/assets/fig3-method.png">
+<meta property="og:image:alt" content="The original STAR-Pro two-stage method figure from the paper.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="STAR-Pro — Efficient Large Vision-Language Models">
+<meta name="twitter:description" content="Training-free visual token pruning: broad coverage followed by progressive refinement.">
+<meta name="twitter:image" content="https://easonai-5589.github.io/starpro/assets/fig3-method.png">
+<meta name="citation_title" content="STAR-Pro: Stage-Wise Token Adaptive Reduction with Progressive Refinement for Efficient Large Vision-Language Models">
+<meta name="citation_author" content="Yichen Guo">
+<meta name="citation_author" content="Tinghao Wang">
+<meta name="citation_author" content="Qizhe Zhang">
+<meta name="citation_author" content="Lingbei Meng">
+<meta name="citation_author" content="Yuan Zhang">
+<meta name="citation_author" content="Jiajun Cao">
+<meta name="citation_author" content="Hao Jiang">
+<meta name="citation_author" content="Chenwei Wu">
+<meta name="citation_author" content="Jixian Wu">
+<meta name="citation_author" content="Sixiang Chen">
+<meta name="citation_author" content="Tao Luo">
+<meta name="citation_author" content="Hongyang Cheng">
+<meta name="citation_author" content="Kai Tang">
+<meta name="citation_author" content="Chenxi Li">
+<meta name="citation_author" content="Renyuan Li">
+<meta name="citation_author" content="Xiande Huang">
+<meta name="citation_author" content="Wenya Wang">
+<meta name="citation_author" content="Shanghang Zhang">
+<meta name="citation_publication_date" content="2026/09/05">
+<meta name="citation_arxiv_id" content="2609.05916">
+<meta name="citation_pdf_url" content="https://arxiv.org/pdf/2609.05916">
+<link rel="icon" type="image/png" href="assets/starpro-logo.png">
+<link rel="stylesheet" href="style.css">
+<script src="site.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header"><a class="brand" href="#top"><img src="assets/starpro-logo.png" width="40" height="35" alt=""><span>STAR-Pro</span></a><nav aria-label="Main navigation"><a href="#overview">Overview</a><a href="#method">Method</a><a href="#results">Results</a><a href="#resources">Resources</a><a href="#citation">Cite</a></nav></header>
+<main id="main">
+<section class="hero container" id="top" aria-labelledby="paper-title">
+  <p class="eyebrow">Training-free visual token pruning</p>
+  <h1 id="paper-title"><span class="paper-brand"><img src="assets/starpro-logo.png" width="72" height="63" alt="">STAR-Pro</span><span class="paper-title">Stage-Wise Token Adaptive Reduction<br class="wide-break"> with Progressive Refinement for Efficient<br class="wide-break"> Large Vision-Language Models</span></h1>
+  <div class="authors" aria-label="Authors"><span><a href="https://easonai-5589.github.io/">Yichen Guo</a><sup>1,2,*</sup></span>
+<span>Tinghao Wang<sup>1,3,*</sup></span>
+<span>Qizhe Zhang<sup>1,*</sup></span>
+<span>Lingbei Meng<sup>5</sup></span>
+<span>Yuan Zhang<sup>1</sup></span>
+<span>Jiajun Cao<sup>1</sup></span>
+<span>Hao Jiang<sup>3</sup></span>
+<span>Chenwei Wu<sup>4</sup></span>
+<span>Jixian Wu<sup>1</sup></span>
+<span>Sixiang Chen<sup>1</sup></span>
+<span>Tao Luo<sup>3</sup></span>
+<span>Hongyang Cheng<sup>1</sup></span>
+<span>Kai Tang<sup>1,2</sup></span>
+<span>Chenxi Li<sup>5</sup></span>
+<span>Renyuan Li<sup>3</sup></span>
+<span>Xiande Huang<sup>5</sup></span>
+<span>Wenya Wang<sup>2</sup></span>
+<span>Shanghang Zhang<sup>1,†</sup></span></div>
+  <div class="affiliations"><span><sup>1</sup> Peking University</span><span><sup>2</sup> Nanyang Technological University</span><span><sup>3</sup> University of Electronic Science and Technology of China</span><span><sup>4</sup> University of Michigan, Ann Arbor</span><span><sup>5</sup> De Artificial Intelligence Lab</span></div>
+  <p class="contributions">* Equal contribution &nbsp; · &nbsp; † Corresponding author</p>
+  <div class="resource-buttons"><a class="button primary" href="https://arxiv.org/pdf/2609.05916">Read the paper <span aria-hidden="true">↗</span></a><a class="button" href="https://arxiv.org/abs/2609.05916">arXiv</a><a class="button" href="https://github.com/EasonAI-5589/starpro">Code <span aria-hidden="true">↗</span></a><a class="button" href="#citation">BibTeX</a></div>
+  <p class="paper-date">arXiv preprint · September 2026</p>
+</section>
+<section class="container section" id="overview" aria-labelledby="overview-title">
+  <div class="section-heading"><p class="eyebrow">01 / Overview</p><h2 id="overview-title">Preserve coverage.<br>Refine progressively.</h2></div>
+  <div class="prose"><p>Large vision-language models spend substantial computation processing visual tokens. STAR-Pro reduces this cost without training: it first preserves broad visual feature coverage, then progressively narrows the retained token set as the model develops cross-modal evidence.</p><p>The Adaptive Stage uses pivoted QR to select an over-budget candidate pool before fusion. The Progressive Stage follows evolving text-to-visual attention at selected decoder layers, retaining nested token sets under a target layer-average budget. The paper evaluates this approach across <strong>seven LVLMs and 18 image and video benchmarks</strong>.</p></div>
+  <div class="metrics" aria-label="Reported LLaVA-Video-7B results"><div><strong>90.5<span>%</span></strong><p>fewer visual tokens</p></div><div><strong>92.7<span>%</span></strong><p>of baseline performance retained</p></div><div><strong>2.24<span>×</span></strong><p>measured inference speedup</p></div></div>
+  <p class="measurement-note">LLaVA-Video-7B · 64 frames · 16 nominal tokens per frame. Speed measured with one generated token; <a href="#efficiency">see the timing protocol</a>.</p>
+</section>
+<section class="section container" id="method" aria-labelledby="method-title">
+  <div class="section-heading"><p class="eyebrow">02 / Method</p><h2 id="method-title">Two stages, one token budget.</h2></div>
+  <figure class="wide-figure"><a href="assets/fig3-method.png" aria-label="Open full-resolution STAR-Pro method figure"><img src="assets/fig3-method.png" width="2200" height="1238" loading="lazy" alt="STAR-Pro pipeline: pivoted QR selects a visually diverse candidate pool before fusion; successive decoder layers refine the surviving tokens using text-to-visual attention."></a><figcaption><span>Figure 3</span> The original method figure. Select any figure to open it at full resolution.</figcaption></figure>
+  <div class="stage-grid"><div><p class="eyebrow">Adaptive stage</p><h3>Start with broad visual evidence.</h3><p>Pivoted QR selects feature-space coverage before cross-modal fusion. An over-budget pool leaves room for the decoder to discover which visual evidence matters.</p></div><div><p class="eyebrow">Progressive stage</p><h3>Let importance evolve with depth.</h3><p>Text-to-visual attention updates at selected decoder layers. Each pruning step selects from the current survivors, meeting the target layer-average token budget.</p></div></div>
+  <details class="paper-detail"><summary>Why does one-shot token selection fall short?</summary><p>Early aggressive pruning can discard visual coverage, while token importance changes across decoder layers. These two empirical observations motivate the two-stage design.</p><figure><a href="assets/fig2-empirical-study.png"><img src="assets/fig2-empirical-study.png" width="2200" height="677" loading="lazy" alt="Original Figure 2: retained feature coverage before fusion and changes in visual-token importance across decoder depth."></a><figcaption><span>Figure 2</span> Empirical analysis from the paper.</figcaption></figure></details>
+</section>
+<section class="section container" id="results" aria-labelledby="results-title">
+  <div class="section-heading"><p class="eyebrow">03 / Results</p><h2 id="results-title">Less computation.<br>Strong multimodal performance.</h2></div>
+  <div class="results-layout"><div class="results-copy"><h3>Aggressive pruning across architectures.</h3><p>The original paper compares STAR-Pro with visual token pruning baselines across LLaVA-NeXT, LLaVA-Video, Qwen3-VL and InternVL3.</p><p>Each radar axis is normalized to the strongest plotted method. The panel summaries compare STAR-Pro with the strongest competing method, relative to the unpruned model.</p><a class="text-link" href="https://github.com/EasonAI-5589/starpro/blob/main/docs/tables.md">Explore all 16 original paper tables <span aria-hidden="true">↗</span></a><p class="small">The table gallery preserves the paper’s original values, captions and formatting.</p></div><figure><a href="assets/fig1-performance.png"><img src="assets/fig1-performance.png" width="1600" height="1662" loading="lazy" alt="Original Figure 1: performance radar plots for four model architectures at approximately 90 percent visual token reduction."></a><figcaption><span>Figure 1</span> Performance at approximately 90% token reduction.</figcaption></figure></div>
+  <div class="efficiency" id="efficiency"><h3>Measured efficiency, with the protocol in view.</h3><figure><a href="assets/fig4-efficiency.png"><img src="assets/fig4-efficiency.png" width="2200" height="893" loading="lazy" alt="Original Figure 4: latency, compute, GPU memory, speedup and relative performance for LLaVA-NeXT-7B and LLaVA-Video-7B."></a><figcaption><span>Figure 4</span> Accuracy–efficiency trade-offs from the paper.</figcaption></figure><p class="measurement-note">One A800-80GB GPU · batch size 1 · one generated token · 10 warm-up and 50 measured samples. Timing excludes CPU video decoding and preprocessing. Operator-counted TFLOPs exclude unexposed fused-attention operations and top-k/QR selection. <a href="https://arxiv.org/pdf/2609.05916#page=17">Appendix C.3 ↗</a></p></div>
+</section>
+<section class="section container" id="resources" aria-labelledby="resources-title"><div class="section-heading"><p class="eyebrow">04 / Resources</p><h2 id="resources-title">Reproduce and explore.</h2></div><p class="prose">The public release provides a LLaVA overlay for LLaVA-1.5 and LLaVA-NeXT, in 7B and 13B sizes. LLaVA-Video, Qwen3-VL and InternVL3 results are reported in the paper; their implementations are outside this release.</p><div class="resource-grid"><a href="https://github.com/EasonAI-5589/starpro/blob/main/docs/installation.md"><span>01</span><h3>Installation ↗</h3><p>Environment setup and model checkpoints.</p></a><a href="https://github.com/EasonAI-5589/starpro/blob/main/docs/datasets.md"><span>02</span><h3>Datasets ↗</h3><p>Official sources and benchmark input layouts.</p></a><a href="https://github.com/EasonAI-5589/starpro/blob/main/docs/evaluation.md"><span>03</span><h3>Evaluation ↗</h3><p>Inference, scoring and release checks.</p></a><a href="https://github.com/EasonAI-5589/starpro/blob/main/docs/baselines.md"><span>04</span><h3>Baselines ↗</h3><p>Supported methods and comparison settings.</p></a></div></section>
+<section class="section container" id="citation" aria-labelledby="citation-title"><div class="citation-heading"><div class="section-heading"><p class="eyebrow">05 / Citation</p><h2 id="citation-title">Cite STAR-Pro.</h2></div><div class="citation-actions"><button class="button" id="copy-citation" type="button" hidden>Copy BibTeX</button><a class="button" href="starpro.bib" download>Download .bib</a></div></div><p class="small">arXiv preprint · Official arXiv metadata, with capitalization protected for STAR-Pro.</p><pre tabindex="0" aria-label="STAR-Pro BibTeX citation"><code id="bibtex">@misc{guo2026starprostagewisetokenadaptive,
+      title={{STAR-Pro}: Stage-Wise Token Adaptive Reduction with Progressive Refinement for Efficient Large Vision-Language Models},
+      author={Yichen Guo and Tinghao Wang and Qizhe Zhang and Lingbei Meng and Yuan Zhang and Jiajun Cao and Hao Jiang and Chenwei Wu and Jixian Wu and Sixiang Chen and Tao Luo and Hongyang Cheng and Kai Tang and Chenxi Li and Renyuan Li and Xiande Huang and Wenya Wang and Shanghang Zhang},
+      year={2026},
+      eprint={2609.05916},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2609.05916},
+}</code></pre><p id="copy-status" class="copy-status" role="status" aria-live="polite"></p></section>
+</main>
+<footer class="container"><a class="brand" href="#top"><img src="assets/starpro-logo.png" width="40" height="35" alt="">STAR-Pro</a><p>Research by the STAR-Pro authors · 2026</p><a href="https://github.com/EasonAI-5589/starpro">Project repository ↗</a></footer>
+</body></html>
