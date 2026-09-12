@@ -9,10 +9,11 @@ Local preview from the repository root:
 python3 -m http.server 4191 --bind 127.0.0.1 --directory website
 ```
 
-The intended public URL is `https://easonai-5589.github.io/starpro/`.
-Canonical and sharing metadata target that URL. This directory has not been
-deployed by adding these files. Publish the contents of `website/` as a GitHub
-Pages artifact after review. Existing Python/research files are not site content.
+The public URL is `https://easonai-5589.github.io/starpro/`.
+Canonical and sharing metadata target that URL. The GitHub Pages workflow in
+`.github/workflows/pages.yml` publishes `website/` when its files change on
+`main`, and can also be run manually. Existing Python/research files are not
+included in the published site.
 
 ## Sources and maintenance
 
